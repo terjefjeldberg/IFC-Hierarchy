@@ -1,1 +1,106 @@
-﻿(function (global) {  "use strict";  function HierarchyStore(apiAdapter) {    this.apiAdapter = apiAdapter;    this.nodesById = {};    this.rootId = null;    this.expanded = {};    this.loading = {};    this.error = "";    this.capabilities = apiAdapter.probeCapabilities();    this.onChange = function () {};  }  HierarchyStore.prototype.emit = function () {    this.onChange(this.getState());  };  HierarchyStore.prototype.getState = function () {    return {      rootId: this.rootId,      nodesById: this.nodesById,      expanded: this.expanded,      loading: this.loading,      error: this.error,      capabilities: this.capabilities,    };  };  HierarchyStore.prototype.upsertNode = function (node, parentId) {    var id = String(node.id);    var existing = this.nodesById[id] || {};    this.nodesById[id] = {      id: id,      type: node.type,      name: node.name,      hasChildren: !!node.hasChildren,      parentId: parentId || existing.parentId || null,      childrenIds: existing.childrenIds || [],      childrenLoaded: !!existing.childrenLoaded,      meta: node.meta || existing.meta || {},    };    return this.nodesById[id];  };  HierarchyStore.prototype.init = function () {    var self = this;    this.error = "";    return this.apiAdapter      .fetchRoot()      .then(function (root) {        var rootNode = self.upsertNode(root, null);        rootNode.childrenLoaded = false;        self.rootId = rootNode.id;        self.expanded[rootNode.id] = true;        self.emit();        return self.loadChildren(rootNode.id);      })      .catch(function (err) {        self.error = err && err.message ? err.message : "Failed to initialize";        self.emit();      });  };  HierarchyStore.prototype.toggle = function (nodeId) {    if (!this.nodesById[nodeId]) return;    this.expanded[nodeId] = !this.expanded[nodeId];    this.emit();    if (this.expanded[nodeId]) return this.loadChildren(nodeId);    return Promise.resolve();  };  HierarchyStore.prototype.loadChildren = function (nodeId) {    var self = this;    var node = this.nodesById[nodeId];    if (!node || !node.hasChildren) return Promise.resolve([]);    if (node.childrenLoaded) return Promise.resolve(node.childrenIds);    if (this.loading[nodeId]) return Promise.resolve([]);    this.loading[nodeId] = true;    this.emit();    return this.apiAdapter      .fetchChildren(node)      .then(function (children) {        var ids = [];        (children || []).forEach(function (child) {          var row = self.upsertNode(child, nodeId);          ids.push(row.id);        });        node.childrenIds = ids;        node.childrenLoaded = true;        self.loading[nodeId] = false;        self.emit();        return ids;      })      .catch(function (err) {        self.loading[nodeId] = false;        self.error = err && err.message ? err.message : "Failed to load children";        self.emit();        return [];      });  };  global.HierarchyStore = HierarchyStore;})(window);
+﻿(function (global) {
+  "use strict";
+
+  function HierarchyStore(apiAdapter) {
+    this.apiAdapter = apiAdapter;
+    this.nodesById = {};
+    this.rootId = null;
+    this.expanded = {};
+    this.loading = {};
+    this.error = "";
+    this.capabilities = apiAdapter.probeCapabilities();
+    this.onChange = function () {};
+  }
+
+  HierarchyStore.prototype.emit = function () {
+    this.onChange(this.getState());
+  };
+
+  HierarchyStore.prototype.getState = function () {
+    return {
+      rootId: this.rootId,
+      nodesById: this.nodesById,
+      expanded: this.expanded,
+      loading: this.loading,
+      error: this.error,
+      capabilities: this.capabilities,
+    };
+  };
+
+  HierarchyStore.prototype.upsertNode = function (node, parentId) {
+    var id = String(node.id);
+    var existing = this.nodesById[id] || {};
+    this.nodesById[id] = {
+      id: id,
+      type: node.type,
+      name: node.name,
+      hasChildren: !!node.hasChildren,
+      parentId: parentId || existing.parentId || null,
+      childrenIds: existing.childrenIds || [],
+      childrenLoaded: !!existing.childrenLoaded,
+      meta: node.meta || existing.meta || {},
+    };
+    return this.nodesById[id];
+  };
+
+  HierarchyStore.prototype.init = function () {
+    var self = this;
+    this.error = "";
+    return this.apiAdapter
+      .fetchRoot()
+      .then(function (root) {
+        var rootNode = self.upsertNode(root, null);
+        rootNode.childrenLoaded = false;
+        self.rootId = rootNode.id;
+        self.expanded[rootNode.id] = true;
+        self.emit();
+        return self.loadChildren(rootNode.id);
+      })
+      .catch(function (err) {
+        self.error = err && err.message ? err.message : "Failed to initialize";
+        self.emit();
+      });
+  };
+
+  HierarchyStore.prototype.toggle = function (nodeId) {
+    if (!this.nodesById[nodeId]) return;
+    this.expanded[nodeId] = !this.expanded[nodeId];
+    this.emit();
+    if (this.expanded[nodeId]) return this.loadChildren(nodeId);
+    return Promise.resolve();
+  };
+
+  HierarchyStore.prototype.loadChildren = function (nodeId) {
+    var self = this;
+    var node = this.nodesById[nodeId];
+    if (!node || !node.hasChildren) return Promise.resolve([]);
+    if (node.childrenLoaded) return Promise.resolve(node.childrenIds);
+    if (this.loading[nodeId]) return Promise.resolve([]);
+
+    this.loading[nodeId] = true;
+    this.emit();
+
+    return this.apiAdapter
+      .fetchChildren(node)
+      .then(function (children) {
+        var ids = [];
+        (children || []).forEach(function (child) {
+          var row = self.upsertNode(child, nodeId);
+          ids.push(row.id);
+        });
+        node.childrenIds = ids;
+        node.childrenLoaded = true;
+        self.loading[nodeId] = false;
+        self.emit();
+        return ids;
+      })
+      .catch(function (err) {
+        self.loading[nodeId] = false;
+        self.error = err && err.message ? err.message : "Failed to load children";
+        self.emit();
+        return [];
+      });
+  };
+
+  global.HierarchyStore = HierarchyStore;
+})(window);

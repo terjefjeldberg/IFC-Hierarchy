@@ -1,1 +1,131 @@
-﻿<!doctype html><html lang="en">  <head>    <meta charset="utf-8" />    <meta name="viewport" content="width=device-width,initial-scale=1" />    <title>IFC Hierarchy Starter</title>    <style>      :root {        --bg: #101216;        --panel: #1a1f27;        --line: #2b3340;        --text: #e8edf5;        --muted: #9ba8bb;        --warn: #ffad47;        --err: #ff5d5d;      }      html,      body {        margin: 0;        height: 100%;        background: var(--bg);        color: var(--text);        font-family: Consolas, "Courier New", monospace;      }      .app {        height: 100%;        display: grid;        grid-template-rows: auto auto 1fr;      }      .top {        border-bottom: 1px solid var(--line);        padding: 10px 12px;        background: #141922;      }      .top h1 {        margin: 0;        font-size: 14px;        letter-spacing: 0.02em;      }      .status {        font-size: 12px;        padding: 8px 12px;        border-bottom: 1px solid var(--line);      }      .status.ok {        color: var(--muted);      }      .status.err {        color: var(--err);      }      .caps {        font-size: 11px;        color: var(--warn);      }      .tree {        overflow: auto;        padding: 8px 0;        background: var(--panel);      }      .tree-row {        display: flex;        align-items: center;        gap: 6px;        min-height: 28px;      }      .tree-toggle,      .tree-label {        border: 1px solid var(--line);        background: #121722;        color: var(--text);        cursor: pointer;      }      .tree-toggle {        width: 22px;        height: 22px;        padding: 0;      }      .tree-label {        min-height: 22px;        text-align: left;        padding: 0 8px;      }      .tree-spacer {        display: inline-block;        width: 22px;      }      .tree-loading {        color: var(--muted);        font-size: 11px;      }    </style>  </head>  <body>    <div class="app">      <div class="top">        <h1>IFC Hierarchy Widget Starter</h1>      </div>      <div id="status" class="status ok">Starting...</div>      <div id="tree" class="tree"></div>    </div>    <div id="capabilities" class="status caps"></div>    <script src="../streambim-widget-api.min.js"></script>    <script src="./hierarchy-api.js"></script>    <script src="./hierarchy-store.js"></script>    <script src="./hierarchy-view.js"></script>    <script>      (function () {        function init(api) {          var adapter = new window.HierarchyApi(api);          var store = new window.HierarchyStore(adapter);          new window.HierarchyView(document.body, store, api);          store.init();        }        if (window.StreamBIM && typeof window.StreamBIM.connect === "function") {          window.StreamBIM            .connect({})            .then(function (api) {              init(api || window.StreamBIM);            })            .catch(function () {              init(window.StreamBIM || null);            });        } else {          init(null);        }      })();    </script>  </body></html>
+﻿<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>IFC Hierarchy Starter</title>
+    <style>
+      :root {
+        --bg: #101216;
+        --panel: #1a1f27;
+        --line: #2b3340;
+        --text: #e8edf5;
+        --muted: #9ba8bb;
+        --warn: #ffad47;
+        --err: #ff5d5d;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: var(--bg);
+        color: var(--text);
+        font-family: Consolas, "Courier New", monospace;
+      }
+      .app {
+        height: 100%;
+        display: grid;
+        grid-template-rows: auto auto 1fr;
+      }
+      .top {
+        border-bottom: 1px solid var(--line);
+        padding: 10px 12px;
+        background: #141922;
+      }
+      .top h1 {
+        margin: 0;
+        font-size: 14px;
+        letter-spacing: 0.02em;
+      }
+      .status {
+        font-size: 12px;
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--line);
+      }
+      .status.ok {
+        color: var(--muted);
+      }
+      .status.err {
+        color: var(--err);
+      }
+      .caps {
+        font-size: 11px;
+        color: var(--warn);
+      }
+      .tree {
+        overflow: auto;
+        padding: 8px 0;
+        background: var(--panel);
+      }
+      .tree-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-height: 28px;
+      }
+      .tree-toggle,
+      .tree-label {
+        border: 1px solid var(--line);
+        background: #121722;
+        color: var(--text);
+        cursor: pointer;
+      }
+      .tree-toggle {
+        width: 22px;
+        height: 22px;
+        padding: 0;
+      }
+      .tree-label {
+        min-height: 22px;
+        text-align: left;
+        padding: 0 8px;
+      }
+      .tree-spacer {
+        display: inline-block;
+        width: 22px;
+      }
+      .tree-loading {
+        color: var(--muted);
+        font-size: 11px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <div class="top">
+        <h1>IFC Hierarchy Widget Starter</h1>
+      </div>
+      <div id="status" class="status ok">Starting...</div>
+      <div id="tree" class="tree"></div>
+    </div>
+    <div id="capabilities" class="status caps"></div>
+
+    <script src="../streambim-widget-api.min.js"></script>
+    <script src="./hierarchy-api.js"></script>
+    <script src="./hierarchy-store.js"></script>
+    <script src="./hierarchy-view.js"></script>
+    <script>
+      (function () {
+        function init(api) {
+          var adapter = new window.HierarchyApi(api);
+          var store = new window.HierarchyStore(adapter);
+          new window.HierarchyView(document.body, store, api);
+          store.init();
+        }
+
+        if (window.StreamBIM && typeof window.StreamBIM.connect === "function") {
+          window.StreamBIM
+            .connect({})
+            .then(function (api) {
+              init(api || window.StreamBIM);
+            })
+            .catch(function () {
+              init(window.StreamBIM || null);
+            });
+        } else {
+          init(null);
+        }
+      })();
+    </script>
+  </body>
+</html>
