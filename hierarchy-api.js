@@ -448,6 +448,23 @@
     });
   };
 
+  HierarchyApi.prototype.deriveIfcClassLineage = function (ifcClass) {
+    var name = firstString(ifcClass);
+    if (!name || name === "IfcElement") return name ? [name] : [];
+    if (
+      name === "IfcProject" ||
+      name === "IfcSite" ||
+      name === "IfcBuilding" ||
+      name === "IfcBuildingStorey"
+    ) {
+      return [name];
+    }
+    if (/^Ifc/i.test(name)) {
+      return ["IfcElement", name];
+    }
+    return [name];
+  };
+
   HierarchyApi.prototype.derivePathFromObject = function (detail, identifiers, picked) {
     var elementSources = [
       detail,
@@ -463,7 +480,7 @@
       pickFromSources(elementSources, ["siteId", "site-id", "siteGuid", "site"])
     );
     var siteName = firstString(
-      pickFromSources(elementSources, ["siteName", "site-name"]),
+      pickFromSources(elementSources, ["siteName", "site-name", "spatialContainerName"]),
       siteId ? "Site " + siteId : "Site"
     );
     var buildingId = firstString(
@@ -497,8 +514,12 @@
       pickFromSources(elementSources, ["id", "objectId", "dbId", "expressId"]),
       identifiers[0]
     );
+    var ifcClass = firstString(
+      pickFromSources(elementSources, ["ifcClass", "ifcType", "object-type", "type"])
+    );
     var elementName = firstString(
-      pickFromSources(elementSources, ["name", "Name", "title", "type", "ifcClass"]),
+      pickFromSources(elementSources, ["name", "Name", "title"]),
+      ifcClass,
       elementId ? "Element " + elementId : "Selected element"
     );
 
@@ -530,6 +551,19 @@
         meta: { source: "selected-object", buildingId: buildingId },
       });
     }
+
+    this.deriveIfcClassLineage(ifcClass).forEach(function (typeName, index, all) {
+      if (!typeName || (index === all.length - 1 && !elementId)) return;
+      if (index === all.length - 1) return;
+      path.push({
+        id: "ifc-class::" + typeName,
+        type: "ifc-class",
+        name: typeName,
+        hasChildren: true,
+        meta: { source: "ifc-class-lineage" },
+      });
+    });
+
     if (elementId) {
       path.push({
         id: elementId,
@@ -542,6 +576,7 @@
           raw: detail || picked || {},
           storeyId: storeyId,
           buildingId: buildingId,
+          ifcClass: ifcClass,
         },
       });
     }
@@ -586,4 +621,5 @@
 
   global.HierarchyApi = HierarchyApi;
 })(window);
+
 
