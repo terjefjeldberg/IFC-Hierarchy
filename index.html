@@ -3,70 +3,85 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>IFC Hierarchy Starter</title>
+    <meta name="mobile-web-app-capable" content="yes" />
+    <title>IFC Hierarchy</title>
     <style>
       :root {
-        --bg: #101216;
-        --panel: #1a1f27;
-        --line: #2b3340;
-        --text: #e8edf5;
-        --muted: #9ba8bb;
-        --warn: #ffad47;
-        --err: #ff5d5d;
+        --bg: #0d1117;
+        --panel: #151b24;
+        --line: #293241;
+        --text: #ecf2f8;
+        --muted: #8b98ab;
+        --warn: #ffb454;
+        --err: #ff6b6b;
+        --accent: #57d3a0;
       }
       html,
       body {
         margin: 0;
         height: 100%;
-        background: var(--bg);
+        background: radial-gradient(circle at top, #152034 0, var(--bg) 58%);
         color: var(--text);
         font-family: Consolas, "Courier New", monospace;
       }
       .app {
         height: 100%;
         display: grid;
-        grid-template-rows: auto auto 1fr;
+        grid-template-rows: auto auto auto 1fr;
       }
       .top {
         border-bottom: 1px solid var(--line);
-        padding: 10px 12px;
-        background: #141922;
+        padding: 12px 14px;
+        background: rgba(13, 17, 23, 0.85);
       }
-      .top h1 {
+      .title {
         margin: 0;
-        font-size: 14px;
-        letter-spacing: 0.02em;
+        font-size: 15px;
+        letter-spacing: 0.04em;
       }
-      .status {
+      .subtitle {
+        margin-top: 4px;
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .status,
+      .caps,
+      .hint {
         font-size: 12px;
         padding: 8px 12px;
         border-bottom: 1px solid var(--line);
+        background: var(--panel);
       }
       .status.ok {
-        color: var(--muted);
+        color: var(--accent);
       }
       .status.err {
         color: var(--err);
       }
       .caps {
-        font-size: 11px;
         color: var(--warn);
+        font-size: 11px;
+      }
+      .hint {
+        color: var(--muted);
+        font-size: 11px;
       }
       .tree {
         overflow: auto;
-        padding: 8px 0;
-        background: var(--panel);
+        padding: 10px 0 24px;
+        background: rgba(21, 27, 36, 0.95);
       }
       .tree-row {
         display: flex;
         align-items: center;
         gap: 6px;
-        min-height: 28px;
+        min-height: 30px;
+        padding-right: 8px;
       }
       .tree-toggle,
       .tree-label {
         border: 1px solid var(--line);
-        background: #121722;
+        background: #0f141c;
         color: var(--text);
         cursor: pointer;
       }
@@ -80,27 +95,35 @@
         text-align: left;
         padding: 0 8px;
       }
+      .tree-label-note {
+        color: var(--warn);
+      }
       .tree-spacer {
         display: inline-block;
         width: 22px;
       }
-      .tree-loading {
+      .tree-loading,
+      .tree-source {
+        font-size: 10px;
         color: var(--muted);
-        font-size: 11px;
       }
     </style>
   </head>
   <body>
     <div class="app">
       <div class="top">
-        <h1>IFC Hierarchy Widget Starter</h1>
+        <h1 class="title">IFC Hierarchy</h1>
+        <div class="subtitle">Project -> Site -> Building -> Storey -> Element</div>
       </div>
       <div id="status" class="status ok">Starting...</div>
+      <div id="capabilities" class="caps">Capabilities: none</div>
       <div id="tree" class="tree"></div>
     </div>
-    <div id="capabilities" class="status caps"></div>
+    <div class="hint">
+      This widget only shows true hierarchy where the project API exposes containment relations.
+    </div>
 
-    <script src="../streambim-widget-api.min.js"></script>
+    <script src="./streambim-widget-api.min.js"></script>
     <script src="./hierarchy-api.js"></script>
     <script src="./hierarchy-store.js"></script>
     <script src="./hierarchy-view.js"></script>

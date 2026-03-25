@@ -30,14 +30,16 @@
 
     var label = el(
       "button",
-      "tree-label",
-      "[" + node.type.toUpperCase() + "] " + node.name,
+      "tree-label tree-label-" + node.type,
+      "[" + node.type.toUpperCase() + "] " + node.name
     );
     label.onclick = function () {
       handlers.onSelect(node);
     };
     row.appendChild(label);
 
+    var source = node.meta && node.meta.source ? node.meta.source : "";
+    if (source) row.appendChild(el("span", "tree-source", source));
     if (isLoading) row.appendChild(el("span", "tree-loading", "loading..."));
 
     var fragment = document.createDocumentFragment();
@@ -75,8 +77,8 @@
     this.statusEl.className = state.error ? "status err" : "status ok";
 
     var caps = [];
-    Object.keys(state.capabilities).forEach(function (k) {
-      if (state.capabilities[k]) caps.push(k);
+    Object.keys(state.capabilities).forEach(function (key) {
+      if (state.capabilities[key]) caps.push(key);
     });
     this.capEl.textContent = "Capabilities: " + (caps.join(", ") || "none");
 
@@ -89,14 +91,14 @@
   };
 
   HierarchyView.prototype.onSelectNode = function (node) {
-    if (node.type !== "element") return;
     var api = this.api;
-    var id = node.id;
+    var objectId = (node.meta && node.meta.objectId) || node.id;
+    if (node.type !== "element") return;
     if (typeof api.highlightObject === "function") {
-      api.highlightObject(id).catch(function () {});
+      api.highlightObject(objectId).catch(function () {});
     }
     if (typeof api.gotoObject === "function") {
-      api.gotoObject(id).catch(function () {});
+      api.gotoObject(objectId).catch(function () {});
     }
   };
 

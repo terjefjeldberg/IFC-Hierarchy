@@ -1,23 +1,27 @@
-﻿# IFC Hierarchy Widget Starter
+﻿# IFC Hierarchy Widget
 
-This is a standalone starter for exploring IFC hierarchy in StreamBIM.
+Standalone StreamBIM widget for exploring IFC-style hierarchy with lazy loading.
+
+## What it does
+
+- Renders `Project -> Site -> Building -> Storey -> Element`
+- Uses lazy expansion instead of loading the whole model up front
+- Tries real containment endpoints first through `makeApiRequest(...)`
+- Falls back clearly when the project/widget API does not expose scoped hierarchy
+- Click on an element attempts `highlightObject(...)` and `gotoObject(...)`
 
 ## Files
 
-- `index.html`: Basic UI shell and bootstrap.
-- `hierarchy-api.js`: API adapter and capability probing.
-- `hierarchy-store.js`: State container with lazy child loading.
-- `hierarchy-view.js`: Tree renderer and UI bindings.
+- `index.html`: Widget shell and inline styling
+- `hierarchy-api.js`: StreamBIM adapter and endpoint probing
+- `hierarchy-store.js`: Tree state and lazy child loading
+- `hierarchy-view.js`: Renderer and UI bindings
+- `streambim-widget-api.min.js`: Local widget API bundle
 
-## Goals
+## Deploy
 
-- Render `Project > Site > Building > Storey > Element`.
-- Lazy load children on expand.
-- Fall back cleanly when true IFC containment is not exposed by API.
+GitHub Pages deploy is handled by `.github/workflows/deploy-pages.yml`.
 
-## Notes
+## Important limitation
 
-- This starter is intentionally conservative: it does not assume private backend endpoints.
-- If your project exposes IFC hierarchy endpoints via `makeApiRequest(...)`, wire them in `hierarchy-api.js`.
-- If only flat object APIs are available, this widget will show project/building/storey where possible and mark missing levels clearly.
-
+This widget only shows a true IFC tree if the StreamBIM project exposes containment data. If scoped containment endpoints are missing, the widget will say so instead of inventing a fake hierarchy.
