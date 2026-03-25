@@ -100,6 +100,9 @@
       return "";
     }
     trimmed = trimmed.slice(1, -1).replace(/''/g, "'");
+    trimmed = trimmed.replace(/\\S\\(.)/g, function (_, ch) {
+      return String.fromCharCode(ch.charCodeAt(0) + 128);
+    });
     trimmed = trimmed.replace(/\\X2\\([0-9A-Fa-f]+)\\X0\\/g, function (_, hex) {
       var chars = [];
       var i;
