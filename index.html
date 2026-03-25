@@ -7,24 +7,21 @@
     <title>IFC Hierarchy</title>
     <style>
       :root {
-        --bg: #0f141a;
-        --panel: #161d25;
-        --panel-2: #1c2530;
-        --line: #2d3947;
-        --text: #edf3f9;
-        --muted: #8d9bab;
-        --accent: #8ecbff;
-        --accent-2: #63d2a1;
-        --warn: #ffb454;
-        --err: #ff7575;
-        --selected: #1f3348;
-        --path: #18232e;
+        --bg: #f3f5f7;
+        --panel: #ffffff;
+        --panel-soft: #f8fafb;
+        --line: #d8dee6;
+        --text: #18222d;
+        --muted: #667789;
+        --accent: #2c6db5;
+        --selected: #dceaf8;
+        --selected-line: #67a0da;
       }
       html,
       body {
         margin: 0;
         height: 100%;
-        background: linear-gradient(180deg, #15202d 0%, var(--bg) 62%);
+        background: var(--bg);
         color: var(--text);
         font-family: "Segoe UI", Tahoma, sans-serif;
       }
@@ -32,19 +29,22 @@
         height: 100%;
         display: grid;
         grid-template-rows: auto auto auto auto 1fr auto;
+        background: var(--panel);
       }
       .top {
-        padding: 14px 16px 12px;
+        padding: 10px 12px;
         border-bottom: 1px solid var(--line);
-        background: rgba(15, 20, 26, 0.92);
+        background: var(--panel);
       }
       .title {
         margin: 0;
-        font-size: 15px;
-        letter-spacing: 0.04em;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        color: #22303d;
       }
       .subtitle {
-        margin-top: 4px;
+        margin-top: 3px;
         font-size: 11px;
         color: var(--muted);
       }
@@ -54,45 +54,41 @@
       .selection,
       .hint {
         border-bottom: 1px solid var(--line);
-        background: var(--panel);
+        background: var(--panel-soft);
       }
       .toolbar {
         display: flex;
-        gap: 8px;
-        padding: 8px 12px;
+        gap: 6px;
+        padding: 6px 8px;
       }
       .tool-btn {
-        border: 1px solid var(--line);
-        background: var(--panel-2);
-        color: var(--text);
-        border-radius: 6px;
-        padding: 6px 10px;
+        border: 1px solid #cbd5df;
+        background: #fff;
+        color: #304051;
+        border-radius: 4px;
+        padding: 4px 8px;
         font-size: 11px;
         cursor: pointer;
       }
       .tool-btn:hover {
-        border-color: #4b6077;
+        border-color: #9eb0c2;
       }
       .status,
       .caps,
       .selection,
       .hint {
-        padding: 8px 12px;
-        font-size: 12px;
+        padding: 6px 10px;
+        font-size: 11px;
       }
       .status.ok {
-        color: var(--accent-2);
+        color: #2c7a48;
       }
       .status.err {
-        color: var(--err);
+        color: #c44343;
       }
       .caps,
       .hint {
         color: var(--muted);
-        font-size: 11px;
-      }
-      .selection {
-        background: var(--path);
       }
       .selection-label {
         display: block;
@@ -100,109 +96,108 @@
         text-transform: uppercase;
         letter-spacing: 0.08em;
         color: var(--muted);
-        margin-bottom: 4px;
+        margin-bottom: 3px;
       }
       .selection-path {
-        font-size: 12px;
-        color: var(--text);
+        font-size: 11px;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
       }
       .tree {
         overflow: auto;
-        padding: 10px 8px 28px;
-        background: rgba(22, 29, 37, 0.96);
+        padding: 6px 0 18px;
+        background: var(--panel);
       }
       .tree-row {
         display: flex;
-        align-items: stretch;
-        gap: 8px;
-        min-height: 34px;
-        margin-left: calc(var(--depth) * 16px);
+        align-items: center;
+        min-height: 24px;
+        gap: 4px;
         position: relative;
+        padding-right: 8px;
       }
       .tree-toggle,
-      .tree-card {
-        border: 1px solid var(--line);
-        border-radius: 8px;
+      .tree-spacer {
+        width: 16px;
+        min-width: 16px;
+        text-align: center;
       }
       .tree-toggle {
-        width: 26px;
-        min-width: 26px;
-        height: 26px;
-        margin-top: 4px;
-        background: var(--panel-2);
-        color: var(--accent);
+        border: 0;
+        background: transparent;
+        color: #526274;
         cursor: pointer;
+        font-size: 11px;
+        padding: 0;
       }
-      .tree-spacer {
-        width: 26px;
-        min-width: 26px;
-      }
-      .tree-card {
-        flex: 1;
-        min-width: 0;
-        background: #10171f;
+      .tree-item {
+        border: 0;
+        background: transparent;
         color: var(--text);
         text-align: left;
-        padding: 7px 10px;
         display: flex;
         align-items: center;
-        gap: 8px;
+        gap: 6px;
+        width: 100%;
+        min-height: 24px;
+        padding: 2px 6px;
         cursor: pointer;
+        border-radius: 3px;
       }
-      .tree-card:hover {
-        border-color: #49617b;
-        background: #13202b;
+      .tree-item:hover {
+        background: #eef4fb;
       }
-      .tree-card-in-path {
-        border-color: #3b556e;
+      .tree-item-in-path {
+        background: #f4f8fc;
       }
-      .tree-card-selected {
+      .tree-item-selected {
         background: var(--selected);
-        border-color: var(--accent);
-        box-shadow: inset 3px 0 0 var(--accent);
+        box-shadow: inset 3px 0 0 var(--selected-line);
       }
-      .tree-kind {
-        font-size: 10px;
-        line-height: 1;
-        padding: 4px 6px;
-        border-radius: 999px;
-        background: #213142;
-        color: var(--accent);
+      .tree-icon {
+        width: 16px;
+        min-width: 16px;
+        color: #596b7d;
+        font-size: 13px;
+        text-align: center;
+      }
+      .tree-content {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        min-width: 0;
+        flex: 1;
+      }
+      .tree-title {
+        font-size: 13px;
+        color: #18222d;
         white-space: nowrap;
       }
-      .tree-name {
-        flex: 1;
-        min-width: 0;
+      .tree-subtitle {
+        font-size: 11px;
+        color: var(--muted);
+        white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-        white-space: nowrap;
-        font-size: 13px;
       }
-      .tree-meta,
       .tree-loading {
         font-size: 10px;
         color: var(--muted);
-        white-space: nowrap;
-      }
-      .tree-card-note .tree-kind {
-        background: #3a2d1a;
-        color: var(--warn);
+        margin-left: auto;
       }
     </style>
   </head>
   <body>
     <div class="app">
       <div class="top">
-        <h1 class="title">IFC Hierarchy</h1>
-        <div class="subtitle">Full IFC tree from hierarchy-index.json, with focus on selected StreamBIM objects.</div>
+        <h1 class="title">MODEL TREE</h1>
+        <div class="subtitle">Indexed IFC hierarchy with StreamBIM object focus.</div>
       </div>
       <div class="toolbar">
-        <button id="collapse-all" class="tool-btn">Collapse all</button>
-        <button id="expand-2" class="tool-btn">Expand 2 levels</button>
-        <button id="expand-4" class="tool-btn">Expand 4 levels</button>
+        <button id="collapse-all" class="tool-btn">Collapse</button>
+        <button id="expand-2" class="tool-btn">Expand 2</button>
+        <button id="expand-4" class="tool-btn">Expand 4</button>
       </div>
       <div id="status" class="status ok">Starting...</div>
       <div id="capabilities" class="caps">Capabilities: none</div>
@@ -213,7 +208,7 @@
       <div id="tree" class="tree"></div>
     </div>
     <div class="hint">
-      Click an object in StreamBIM to focus and highlight it in the IFC tree. The tree uses the indexed IFC hierarchy when `hierarchy-index.json` is present.
+      Click an object in StreamBIM to focus the matching IFC node in the model tree.
     </div>
 
     <script src="./streambim-widget-api.min.js"></script>

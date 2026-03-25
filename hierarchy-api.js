@@ -139,6 +139,20 @@
     return this.ifcIndexPromise;
   };
 
+  HierarchyApi.prototype.getIfcModelRoot = function (index) {
+    var sourceFile = firstString(index && index.sourceFile, "IFC Model");
+    return {
+      id: "model::" + sourceFile,
+      type: "model",
+      name: sourceFile.replace(/.ifc$/i, ""),
+      hasChildren: true,
+      meta: {
+        source: "ifc-index",
+        sourceFile: sourceFile,
+      },
+    };
+  };
+
   HierarchyApi.prototype.mapIndexedNode = function (indexedNode) {
     if (!indexedNode) return null;
     return {
@@ -161,6 +175,12 @@
     return this.loadIfcIndex().then(function (index) {
       var indexedNode;
       if (!index || !index.nodes) return null;
+      if (node && node.type === "model") {
+        if (index.rootId && index.nodes[index.rootId]) {
+          return [self.mapIndexedNode(index.nodes[index.rootId])].filter(Boolean);
+        }
+        return [];
+      }
       indexedNode = index.nodes[String(node && node.id)];
       if (!indexedNode) return null;
       return asArray(indexedNode.childrenIds)
@@ -181,9 +201,6 @@
       currentId = index.nodes[currentId].parentId ? String(index.nodes[currentId].parentId) : "";
     }
     path.reverse();
-    if (index.rootId && path.length && String(path[0].id) === String(index.rootId)) {
-      path.shift();
-    }
     return path;
   };
 
@@ -213,7 +230,7 @@
     var self = this;
     return this.loadIfcIndex().then(function (index) {
       if (index && index.rootId && index.nodes && index.nodes[index.rootId]) {
-        return self.mapIndexedNode(index.nodes[index.rootId]);
+        return self.getIfcModelRoot(index);
       }
       if (!api || typeof api.getProjectId !== "function") {
         return {

@@ -96,7 +96,7 @@
         return self.loadChildren(rootNode.id);
       })
       .then(function () {
-        return self.expandToDepth(2);
+        return self.expandToDepth(4);
       })
       .then(function () {
         self.statusMessage = "Ready. Click an object in StreamBIM to focus its IFC path.";
@@ -220,3 +220,4 @@
 
   global.HierarchyStore = HierarchyStore;
 })(window);
+

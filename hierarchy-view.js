@@ -8,11 +8,26 @@
     return node;
   }
 
-  function prettyType(node) {
-    var ifcClass = node && node.meta && node.meta.ifcClass ? String(node.meta.ifcClass) : "";
-    if (ifcClass) return ifcClass;
-    if (!node || !node.type) return "Node";
-    return String(node.type).charAt(0).toUpperCase() + String(node.type).slice(1);
+  function iconForNode(node) {
+    var type = node && node.type ? String(node.type) : "node";
+    if (type === "model") return "▣";
+    if (type === "project") return "⌘";
+    if (type === "site") return "⌂";
+    if (type === "building") return "▤";
+    if (type === "storey") return "≡";
+    if (type === "note") return "!";
+    return "◻";
+  }
+
+  function detailForNode(node) {
+    if (!node) return "";
+    if (node.meta && node.meta.ifcClass) return String(node.meta.ifcClass);
+    if (node.type === "model" && node.meta && node.meta.sourceFile) return String(node.meta.sourceFile);
+    if (node.type === "project") return "IfcProject";
+    if (node.type === "site") return "IfcSite";
+    if (node.type === "building") return "IfcBuilding";
+    if (node.type === "storey") return "IfcBuildingStorey";
+    return "";
   }
 
   function renderNode(state, nodeId, depth, handlers) {
@@ -23,15 +38,16 @@
     var inSelectedPath;
     var toggle;
     var card;
-    var badge;
-    var name;
-    var meta;
+    var icon;
+    var content;
+    var title;
+    var subtitle;
     var fragment;
 
     if (!node) return null;
 
     row = el("div", "tree-row");
-    row.style.setProperty("--depth", String(depth));
+    row.style.paddingLeft = String(depth * 18 + 6) + "px";
     row.setAttribute("data-node-id", nodeId);
 
     expanded = !!state.expanded[nodeId];
@@ -48,29 +64,34 @@
       row.appendChild(el("span", "tree-spacer", ""));
     }
 
-    card = el("button", "tree-card tree-card-" + node.type);
-    if (inSelectedPath) card.className += " tree-card-in-path";
+    card = el("button", "tree-item tree-item-" + node.type);
+    if (inSelectedPath) card.className += " tree-item-in-path";
     if (state.selectedId && String(state.selectedId) === String(nodeId)) {
-      card.className += " tree-card-selected";
+      card.className += " tree-item-selected";
     }
     card.onclick = function () {
       handlers.onSelect(node);
     };
 
-    badge = el("span", "tree-kind", prettyType(node));
-    card.appendChild(badge);
+    icon = el("span", "tree-icon tree-icon-" + node.type, iconForNode(node));
+    card.appendChild(icon);
 
-    name = el("span", "tree-name", node.name || node.id);
-    card.appendChild(name);
+    content = el("span", "tree-content");
+    title = el("span", "tree-title", node.name || node.id);
+    content.appendChild(title);
 
+    subtitle = detailForNode(node);
+    if (subtitle) {
+      content.appendChild(el("span", "tree-subtitle", subtitle));
+    }
     if (node.meta && node.meta.objectId) {
-      card.title = node.meta.objectId;
+      card.title = String(node.meta.objectId);
     }
-
     if (isLoading) {
-      card.appendChild(el("span", "tree-loading", "loading"));
+      content.appendChild(el("span", "tree-loading", "loading"));
     }
 
+    card.appendChild(content);
     row.appendChild(card);
 
     fragment = document.createDocumentFragment();
@@ -181,4 +202,3 @@
 
   global.HierarchyView = HierarchyView;
 })(window);
-
