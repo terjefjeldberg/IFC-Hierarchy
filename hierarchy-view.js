@@ -10,7 +10,7 @@
 
   function iconForNode(node) {
     var type = node && node.type ? String(node.type) : "node";
-    if (type === "model") return "▣";
+    if (type === "model") return "▦";
     if (type === "project") return "⌘";
     if (type === "site") return "⌂";
     if (type === "building") return "▤";
@@ -37,17 +37,17 @@
     var isLoading;
     var inSelectedPath;
     var toggle;
-    var card;
+    var item;
     var icon;
-    var content;
     var title;
-    var subtitle;
+    var detail;
+    var loading;
     var fragment;
 
     if (!node) return null;
 
     row = el("div", "tree-row");
-    row.style.paddingLeft = String(depth * 18 + 6) + "px";
+    row.style.paddingLeft = String(depth * 18 + 8) + "px";
     row.setAttribute("data-node-id", nodeId);
 
     expanded = !!state.expanded[nodeId];
@@ -56,7 +56,8 @@
 
     if (node.hasChildren) {
       toggle = el("button", "tree-toggle", expanded ? "▾" : "▸");
-      toggle.onclick = function () {
+      toggle.onclick = function (event) {
+        event.stopPropagation();
         handlers.onToggle(nodeId);
       };
       row.appendChild(toggle);
@@ -64,35 +65,36 @@
       row.appendChild(el("span", "tree-spacer", ""));
     }
 
-    card = el("button", "tree-item tree-item-" + node.type);
-    if (inSelectedPath) card.className += " tree-item-in-path";
+    item = el("button", "tree-item");
+    if (inSelectedPath) item.className += " tree-item-in-path";
     if (state.selectedId && String(state.selectedId) === String(nodeId)) {
-      card.className += " tree-item-selected";
+      item.className += " tree-item-selected";
     }
-    card.onclick = function () {
+    item.onclick = function () {
       handlers.onSelect(node);
     };
 
     icon = el("span", "tree-icon tree-icon-" + node.type, iconForNode(node));
-    card.appendChild(icon);
+    item.appendChild(icon);
 
-    content = el("span", "tree-content");
     title = el("span", "tree-title", node.name || node.id);
-    content.appendChild(title);
+    item.appendChild(title);
 
-    subtitle = detailForNode(node);
-    if (subtitle) {
-      content.appendChild(el("span", "tree-subtitle", subtitle));
+    detail = detailForNode(node);
+    if (detail) {
+      item.appendChild(el("span", "tree-detail", detail));
     }
-    if (node.meta && node.meta.objectId) {
-      card.title = String(node.meta.objectId);
-    }
+
     if (isLoading) {
-      content.appendChild(el("span", "tree-loading", "loading"));
+      loading = el("span", "tree-loading", "loading");
+      item.appendChild(loading);
     }
 
-    card.appendChild(content);
-    row.appendChild(card);
+    if (node.meta && node.meta.objectId) {
+      item.title = String(node.meta.objectId);
+    }
+
+    row.appendChild(item);
 
     fragment = document.createDocumentFragment();
     fragment.appendChild(row);
@@ -112,8 +114,7 @@
     this.store = store;
     this.api = api || {};
     this.statusEl = document.getElementById("status");
-    this.capEl = document.getElementById("capabilities");
-    this.pathEl = document.getElementById("selection-path");
+    this.metaEl = document.getElementById("meta");
     this.treeEl = document.getElementById("tree");
     this.collapseBtn = document.getElementById("collapse-all");
     this.expand2Btn = document.getElementById("expand-2");
@@ -147,26 +148,16 @@
     var self = this;
     var caps = [];
     var content;
-    var pathLabel = "No object selected";
 
     this.treeEl.innerHTML = "";
     this.statusEl.textContent = state.statusMessage || "Ready";
-    this.statusEl.className = state.error ? "status err" : "status ok";
+    this.statusEl.className = state.error ? "footer-status err" : "footer-status ok";
 
     Object.keys(state.capabilities).forEach(function (key) {
       if (state.capabilities[key]) caps.push(key);
     });
-    this.capEl.textContent = "Capabilities: " + (caps.join(", ") || "none");
-
-    if (state.selectedPath && state.selectedPath.length) {
-      pathLabel = state.selectedPath
-        .map(function (nodeId) {
-          var node = state.nodesById[nodeId];
-          return node ? node.name : nodeId;
-        })
-        .join(" > ");
-    }
-    this.pathEl.textContent = pathLabel;
+    this.metaEl.textContent = "API";
+    this.metaEl.title = "Capabilities: " + (caps.join(", ") || "none");
 
     if (!state.rootId) return;
     content = renderNode(state, state.rootId, 0, {

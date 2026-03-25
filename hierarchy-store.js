@@ -77,6 +77,7 @@
     if (!this.nodesById[nodeId]) return;
     this.selectedId = String(nodeId);
     this.rebuildSelectedPath();
+    this.statusMessage = "Selected: " + (this.nodesById[nodeId].name || nodeId);
     this.emit();
   };
 
@@ -99,7 +100,7 @@
         return self.expandToDepth(4);
       })
       .then(function () {
-        self.statusMessage = "Ready. Click an object in StreamBIM to focus its IFC path.";
+        self.statusMessage = "Ready";
         self.emit();
       })
       .catch(function (err) {
@@ -170,8 +171,8 @@
     this.emit();
     return visit(this.rootId, 0).then(function () {
       self.statusMessage = self.selectedId
-        ? "Focused selected object: " + self.selectedId
-        : "Ready. Click an object in StreamBIM to focus its IFC path.";
+        ? "Selected: " + (self.nodesById[self.selectedId] && self.nodesById[self.selectedId].name || self.selectedId)
+        : "Ready";
       self.emit();
     });
   };
@@ -195,7 +196,6 @@
         var i;
         if (!parentId) return;
 
-        self.expanded = {};
         self.expanded[parentId] = true;
         for (i = 0; i < path.length; i++) {
           var row = self.upsertNode(path[i], parentId);
@@ -207,8 +207,8 @@
         self.selectedId = result && result.selectedId ? String(result.selectedId) : "";
         self.rebuildSelectedPath();
         self.statusMessage = self.selectedId
-          ? "Focused selected object: " + self.selectedId
-          : "Clicked object resolved";
+          ? "Selected: " + ((self.nodesById[self.selectedId] && self.nodesById[self.selectedId].name) || self.selectedId)
+          : "Object resolved";
         self.emit();
       })
       .catch(function (err) {
@@ -220,4 +220,3 @@
 
   global.HierarchyStore = HierarchyStore;
 })(window);
-
