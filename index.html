@@ -82,13 +82,13 @@
         text-transform: uppercase;
         letter-spacing: 0.08em;
         color: var(--muted);
+        justify-content: flex-start;
       }
       .columns-name {
-        flex: 1;
+        flex: 0 1 auto;
       }
       .columns-type {
-        width: 120px;
-        text-align: right;
+        display: none;
       }
       .tree {
         overflow: auto;
@@ -122,9 +122,9 @@
         border-radius: 3px;
         background: transparent;
         color: var(--text);
-        display: grid;
-        grid-template-columns: 16px minmax(0, 1fr) 120px auto;
+        display: flex;
         align-items: center;
+        justify-content: flex-start;
         gap: 6px;
         width: 100%;
         min-height: 24px;
@@ -157,11 +157,12 @@
         overflow: hidden;
         text-overflow: ellipsis;
         font-size: 13px;
+        text-align: left;
       }
       .tree-detail {
         font-size: 11px;
         color: var(--muted);
-        text-align: right;
+        text-align: left;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
