@@ -15,9 +15,17 @@
     return "";
   }
 
-  function safeNumber(value) {
-    var num = Number(value);
-    return isNaN(num) ? null : num;
+  function uniqueStrings(values) {
+    var seen = {};
+    return asArray(values)
+      .map(function (value) {
+        return value == null ? "" : String(value).trim();
+      })
+      .filter(function (value) {
+        if (!value || seen[value]) return false;
+        seen[value] = true;
+        return true;
+      });
   }
 
   function relationId(row, relationName) {
@@ -38,6 +46,33 @@
     return "";
   }
 
+  function nestedValue(source, path) {
+    var value = source;
+    var i;
+    for (i = 0; i < path.length; i++) {
+      if (!value || typeof value !== "object") return null;
+      value = value[path[i]];
+    }
+    return value == null ? null : value;
+  }
+
+  function pickFromSources(sources, keys) {
+    var i;
+    var j;
+    for (i = 0; i < sources.length; i++) {
+      if (!sources[i] || typeof sources[i] !== "object") continue;
+      for (j = 0; j < keys.length; j++) {
+        if (
+          sources[i][keys[j]] != null &&
+          String(sources[i][keys[j]]).trim()
+        ) {
+          return String(sources[i][keys[j]]).trim();
+        }
+      }
+    }
+    return "";
+  }
+
   function mapJsonApiRow(row) {
     return {
       id: row && row.id != null ? String(row.id) : "",
@@ -47,6 +82,16 @@
         row && row.id != null ? row.id : ""
       ),
       raw: row || {},
+    };
+  }
+
+  function buildNote(id, name, source) {
+    return {
+      id: id,
+      type: "note",
+      name: name,
+      hasChildren: false,
+      meta: { source: source || "note" },
     };
   }
 
@@ -154,13 +199,11 @@
       });
     }
     return Promise.resolve([
-      {
-        id: siteNode.id + "::building::unknown",
-        type: "note",
-        name: "No building endpoint available in widget API",
-        hasChildren: false,
-        meta: { source: "site-fallback" },
-      },
+      buildNote(
+        siteNode.id + "::building::unknown",
+        "No building endpoint available in widget API",
+        "site-fallback"
+      ),
     ]);
   };
 
@@ -208,44 +251,44 @@
       var mapped = self.mapFloorRows(filtered, buildingNode.id, "floors-endpoint");
       if (mapped.length) return mapped;
       return [
-        {
-          id: buildingNode.id + "::storey::missing",
-          type: "note",
-          name: "No storey list exposed by this project/widget API",
-          hasChildren: false,
-          meta: { source: "building-fallback" },
-        },
+        buildNote(
+          buildingNode.id + "::storey::missing",
+          "No storey list exposed by this project/widget API",
+          "building-fallback"
+        ),
       ];
     });
   };
 
   HierarchyApi.prototype.mapFloorRows = function (rows, buildingId, source) {
-    return asArray(rows).map(function (floor) {
-      var floorId = firstString(
-        floor && floor.id,
-        floor && floor.floorId,
-        floor && floor.name,
-        floor && floor.title
-      );
-      var floorName = firstString(
-        floor && floor.name,
-        floor && floor.title,
-        floorId,
-        "Storey"
-      );
-      if (!floorId) return null;
-      return {
-        id: String(floorId),
-        type: "storey",
-        name: String(floorName),
-        hasChildren: true,
-        meta: {
-          source: source,
-          buildingId: String(buildingId || ""),
-          raw: floor.raw || floor,
-        },
-      };
-    }).filter(Boolean);
+    return asArray(rows)
+      .map(function (floor) {
+        var floorId = firstString(
+          floor && floor.id,
+          floor && floor.floorId,
+          floor && floor.name,
+          floor && floor.title
+        );
+        var floorName = firstString(
+          floor && floor.name,
+          floor && floor.title,
+          floorId,
+          "Storey"
+        );
+        if (!floorId) return null;
+        return {
+          id: String(floorId),
+          type: "storey",
+          name: String(floorName),
+          hasChildren: true,
+          meta: {
+            source: source,
+            buildingId: String(buildingId || ""),
+            raw: floor.raw || floor,
+          },
+        };
+      })
+      .filter(Boolean);
   };
 
   HierarchyApi.prototype.fetchStoreyChildren = function (storeyNode) {
@@ -259,46 +302,230 @@
       var mapped = self.mapElementRows(rows, storeyNode.id, "storey-objects-endpoint");
       if (mapped.length) return mapped;
       return [
-        {
-          id: storeyNode.id + "::elements::missing",
-          type: "note",
-          name: "No scoped element endpoint exposed for this storey",
-          hasChildren: false,
-          meta: { source: "storey-fallback" },
-        },
+        buildNote(
+          storeyNode.id + "::elements::missing",
+          "No scoped element endpoint exposed for this storey",
+          "storey-fallback"
+        ),
       ];
     });
   };
 
   HierarchyApi.prototype.mapElementRows = function (rows, storeyId, source) {
-    return asArray(rows).map(function (row, index) {
-      var id = firstString(
-        row && row.id,
-        attributeValue(row, ["guid", "global-id", "globalId", "object-id"]),
-        index
+    return asArray(rows)
+      .map(function (row, index) {
+        var id = firstString(
+          row && row.id,
+          attributeValue(row, ["guid", "global-id", "globalId", "object-id"]),
+          index
+        );
+        if (!String(id).trim()) return null;
+        return {
+          id: String(id),
+          type: "element",
+          name: firstString(
+            row && row.name,
+            attributeValue(row, ["name", "type", "object-type", "ifc-class"]),
+            "Element " + id
+          ),
+          hasChildren: false,
+          meta: {
+            source: source,
+            storeyId: String(storeyId || ""),
+            raw: row.raw || row,
+            objectId: firstString(
+              row && row.id,
+              attributeValue(row, ["object-id", "guid", "global-id", "globalId"]),
+              id
+            ),
+          },
+        };
+      })
+      .filter(Boolean);
+  };
+
+  HierarchyApi.prototype.extractPickedObjectCandidates = function (picked) {
+    var sources = [
+      picked,
+      nestedValue(picked, ["object"]),
+      nestedValue(picked, ["item"]),
+      nestedValue(picked, ["data"]),
+      nestedValue(picked, ["result"]),
+      nestedValue(picked, ["selection"]),
+    ];
+
+    return uniqueStrings([
+      pickFromSources(sources, ["guid", "globalId", "ifcGuid", "GlobalId"]),
+      pickFromSources(sources, ["id", "objectId", "dbId", "expressId"]),
+      pickFromSources(sources, ["objectGuid", "object-guid", "ifcObjectGuid"]),
+    ]);
+  };
+
+  HierarchyApi.prototype.bestEffortGetObjectInfo = function (picked) {
+    var api = this.api || {};
+    var identifiers = this.extractPickedObjectCandidates(picked);
+    var self = this;
+    var index = 0;
+
+    if (typeof api.getObjectInfo !== "function") {
+      return Promise.resolve({ detail: null, identifiers: identifiers });
+    }
+
+    function next() {
+      if (index >= identifiers.length) {
+        return Promise.resolve({ detail: null, identifiers: identifiers });
+      }
+      var identifier = identifiers[index++];
+      return api.getObjectInfo(identifier).then(
+        function (detail) {
+          return {
+            detail: detail || null,
+            identifiers: identifiers,
+            selectedId: identifier,
+          };
+        },
+        function () {
+          return next();
+        }
       );
-      if (!String(id).trim()) return null;
+    }
+
+    return next().then(function (result) {
+      if (result.detail) return result;
       return {
-        id: String(id),
+        detail: null,
+        identifiers: identifiers,
+        selectedId: firstString(identifiers[0]),
+      };
+    });
+  };
+
+  HierarchyApi.prototype.resolvePickedObjectPath = function (picked) {
+    var self = this;
+    return this.bestEffortGetObjectInfo(picked).then(function (result) {
+      var detail = result.detail || {};
+      var identifiers = result.identifiers || [];
+      var path = self.derivePathFromObject(detail, identifiers, picked);
+      if (!path.length) {
+        return {
+          selectedId: firstString(result.selectedId, identifiers[0]),
+          path: [
+            {
+              id: "selection::missing",
+              type: "note",
+              name: "Clicked object could not be resolved to hierarchy",
+              hasChildren: false,
+              meta: { source: "selection-fallback" },
+            },
+          ],
+        };
+      }
+      return {
+        selectedId: path[path.length - 1].id,
+        path: path,
+      };
+    });
+  };
+
+  HierarchyApi.prototype.derivePathFromObject = function (detail, identifiers, picked) {
+    var elementSources = [
+      detail,
+      detail && detail.raw,
+      detail && detail.attributes,
+      nestedValue(picked, ["object"]),
+      nestedValue(picked, ["item"]),
+      nestedValue(picked, ["data"]),
+      picked,
+    ];
+    var siteId = firstString(
+      relationId(detail, "site"),
+      pickFromSources(elementSources, ["siteId", "site-id", "siteGuid", "site"])
+    );
+    var siteName = firstString(
+      pickFromSources(elementSources, ["siteName", "site-name"]),
+      siteId ? "Site " + siteId : "Site"
+    );
+    var buildingId = firstString(
+      relationId(detail, "building"),
+      pickFromSources(elementSources, ["buildingId", "building-id", "buildingGuid", "building"])
+    );
+    var buildingName = firstString(
+      pickFromSources(elementSources, ["buildingName", "building-name"]),
+      buildingId ? "Building " + buildingId : "Building"
+    );
+    var storeyId = firstString(
+      relationId(detail, "floor"),
+      relationId(detail, "storey"),
+      relationId(detail, "building-storey"),
+      pickFromSources(elementSources, [
+        "floorId",
+        "floor-id",
+        "storeyId",
+        "storey-id",
+        "buildingStoreyId",
+        "building-storey-id",
+        "levelId",
+      ])
+    );
+    var storeyName = firstString(
+      pickFromSources(elementSources, ["floorName", "storeyName", "levelName"]),
+      storeyId ? "Storey " + storeyId : "Storey"
+    );
+    var elementId = firstString(
+      pickFromSources(elementSources, ["guid", "globalId", "ifcGuid", "GlobalId"]),
+      pickFromSources(elementSources, ["id", "objectId", "dbId", "expressId"]),
+      identifiers[0]
+    );
+    var elementName = firstString(
+      pickFromSources(elementSources, ["name", "Name", "title", "type", "ifcClass"]),
+      elementId ? "Element " + elementId : "Selected element"
+    );
+
+    var path = [];
+    if (siteId || buildingId || storeyId) {
+      path.push({
+        id: siteId || "site::selected",
+        type: "site",
+        name: siteName,
+        hasChildren: true,
+        meta: { source: siteId ? "selected-object" : "synthetic-site" },
+      });
+    }
+    if (buildingId) {
+      path.push({
+        id: buildingId,
+        type: "building",
+        name: buildingName,
+        hasChildren: true,
+        meta: { source: "selected-object" },
+      });
+    }
+    if (storeyId) {
+      path.push({
+        id: storeyId,
+        type: "storey",
+        name: storeyName,
+        hasChildren: true,
+        meta: { source: "selected-object", buildingId: buildingId },
+      });
+    }
+    if (elementId) {
+      path.push({
+        id: elementId,
         type: "element",
-        name: firstString(
-          row && row.name,
-          attributeValue(row, ["name", "type", "object-type", "ifc-class"]),
-          "Element " + id
-        ),
+        name: elementName,
         hasChildren: false,
         meta: {
-          source: source,
-          storeyId: String(storeyId || ""),
-          raw: row.raw || row,
-          objectId: firstString(
-            row && row.id,
-            attributeValue(row, ["object-id", "guid", "global-id", "globalId"]),
-            id
-          ),
+          source: "selected-object",
+          objectId: elementId,
+          raw: detail || picked || {},
+          storeyId: storeyId,
+          buildingId: buildingId,
         },
-      };
-    }).filter(Boolean);
+      });
+    }
+
+    return path;
   };
 
   HierarchyApi.prototype.tryCollections = function (paths) {

@@ -14,6 +14,7 @@
 
     var row = el("div", "tree-row");
     row.style.paddingLeft = String(depth * 14 + 8) + "px";
+    row.setAttribute("data-node-id", nodeId);
 
     var expanded = !!state.expanded[nodeId];
     var isLoading = !!state.loading[nodeId];
@@ -28,9 +29,13 @@
       row.appendChild(el("span", "tree-spacer", " "));
     }
 
+    var className = "tree-label tree-label-" + node.type;
+    if (state.selectedId && String(state.selectedId) === String(nodeId)) {
+      className += " tree-label-selected";
+    }
     var label = el(
       "button",
-      "tree-label tree-label-" + node.type,
+      className,
       "[" + node.type.toUpperCase() + "] " + node.name
     );
     label.onclick = function () {
@@ -72,8 +77,9 @@
   };
 
   HierarchyView.prototype.render = function (state) {
+    var self = this;
     this.treeEl.innerHTML = "";
-    this.statusEl.textContent = state.error || "Ready";
+    this.statusEl.textContent = state.error || state.statusMessage || "Ready";
     this.statusEl.className = state.error ? "status err" : "status ok";
 
     var caps = [];
@@ -88,6 +94,17 @@
       onSelect: this.onSelectNode.bind(this),
     });
     if (content) this.treeEl.appendChild(content);
+
+    if (state.selectedId) {
+      setTimeout(function () {
+        var selected = self.treeEl.querySelector(
+          '[data-node-id="' + String(state.selectedId).replace(/"/g, "") + '"]'
+        );
+        if (selected && typeof selected.scrollIntoView === "function") {
+          selected.scrollIntoView({ block: "nearest" });
+        }
+      }, 0);
+    }
   };
 
   HierarchyView.prototype.onSelectNode = function (node) {

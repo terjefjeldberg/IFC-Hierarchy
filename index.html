@@ -15,6 +15,7 @@
         --warn: #ffb454;
         --err: #ff6b6b;
         --accent: #57d3a0;
+        --selected: #22344b;
       }
       html,
       body {
@@ -95,6 +96,10 @@
         text-align: left;
         padding: 0 8px;
       }
+      .tree-label-selected {
+        background: var(--selected);
+        border-color: #3e5b7f;
+      }
       .tree-label-note {
         color: var(--warn);
       }
@@ -120,7 +125,7 @@
       <div id="tree" class="tree"></div>
     </div>
     <div class="hint">
-      This widget only shows true hierarchy where the project API exposes containment relations.
+      Click an object in StreamBIM to focus its hierarchy path in this tree.
     </div>
 
     <script src="./streambim-widget-api.min.js"></script>
@@ -129,16 +134,37 @@
     <script src="./hierarchy-view.js"></script>
     <script>
       (function () {
+        var pendingPick = null;
+        var activeStore = null;
+
+        function handlePickedObject(res) {
+          if (activeStore) {
+            activeStore.focusPickedObject(res);
+          } else {
+            pendingPick = res;
+          }
+        }
+
         function init(api) {
           var adapter = new window.HierarchyApi(api);
           var store = new window.HierarchyStore(adapter);
+          activeStore = store;
           new window.HierarchyView(document.body, store, api);
-          store.init();
+          store.init().then(function () {
+            if (pendingPick) {
+              store.focusPickedObject(pendingPick);
+              pendingPick = null;
+            }
+          });
         }
 
         if (window.StreamBIM && typeof window.StreamBIM.connect === "function") {
           window.StreamBIM
-            .connect({})
+            .connect({
+              pickedObject: function (res) {
+                handlePickedObject(res);
+              },
+            })
             .then(function (api) {
               init(api || window.StreamBIM);
             })
