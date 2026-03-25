@@ -15,6 +15,7 @@ function decodeIfcStringToken(token) {
   const trimmed = String(token).trim();
   if (!(trimmed.startsWith("'") && trimmed.endsWith("'"))) return "";
   let value = trimmed.slice(1, -1).replace(/''/g, "'");
+  value = value.replace(/\\S\\(.)/g, (_, ch) => String.fromCharCode(ch.charCodeAt(0) + 128));
   value = value.replace(/\\X2\\([0-9A-Fa-f]+)\\X0\\/g, (_, hex) => {
     const chars = [];
     for (let i = 0; i + 3 < hex.length; i += 4) {
