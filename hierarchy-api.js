@@ -400,8 +400,29 @@
     });
   };
 
+  HierarchyApi.prototype.pathHasHierarchyContext = function (path) {
+    return asArray(path).some(function (node) {
+      return (
+        node &&
+        (node.type === "site" ||
+          node.type === "building" ||
+          node.type === "storey")
+      );
+    });
+  };
+
   HierarchyApi.prototype.resolvePickedObjectPath = function (picked) {
     var self = this;
+    var pickedIdentifiers = this.extractPickedObjectCandidates(picked);
+    var directPath = this.derivePathFromObject({}, pickedIdentifiers, picked);
+
+    if (this.pathHasHierarchyContext(directPath)) {
+      return Promise.resolve({
+        selectedId: directPath[directPath.length - 1].id,
+        path: directPath,
+      });
+    }
+
     return this.bestEffortGetObjectInfo(picked).then(function (result) {
       var detail = result.detail || {};
       var identifiers = result.identifiers || [];
@@ -565,3 +586,4 @@
 
   global.HierarchyApi = HierarchyApi;
 })(window);
+
