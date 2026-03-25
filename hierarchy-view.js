@@ -8,16 +8,30 @@
     return node;
   }
 
-  function iconForNode(node) {
+  function iconMarkupForNode(node) {
     var type = node && node.type ? String(node.type) : "node";
-    if (type === "model") return "M";
-    if (type === "project") return "P";
-    if (type === "site") return "S";
-    if (type === "building") return "B";
-    if (type === "storey") return "L";
-    if (type === "workspace") return "W";
-    if (type === "note") return "!";
-    return "[]";
+    if (type === "model") {
+      return '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 1.75h5.5L13 5.25v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-10a1 1 0 0 1 1-1Z"></path><path d="M9.5 1.75v3.5H13"></path></svg>';
+    }
+    if (type === "project") {
+      return '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="4" height="4"></rect><rect x="10" y="2" width="4" height="4"></rect><rect x="2" y="10" width="4" height="4"></rect><rect x="10" y="10" width="4" height="4"></rect></svg>';
+    }
+    if (type === "site") {
+      return '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 12.5 5.5 11l5 1.5L14 11v-7L10.5 5.5l-5-1.5L2 5.5Z"></path><path d="M5.5 4v7"></path><path d="M10.5 5.5v7"></path></svg>';
+    }
+    if (type === "building") {
+      return '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 14.25V2.75h7v11.5"></path><path d="M10 6.25h3v8"></path><path d="M5.25 5.25h1.5"></path><path d="M5.25 8h1.5"></path><path d="M5.25 10.75h1.5"></path><path d="M2 14.25h12"></path></svg>';
+    }
+    if (type === "storey") {
+      return '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.25h10"></path><path d="M3 8h10"></path><path d="M3 11.75h10"></path><path d="M4.5 2.75v10.5"></path></svg>';
+    }
+    if (type === "workspace") {
+      return '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="3"></rect><rect x="2" y="7.5" width="12" height="3"></rect><rect x="2" y="12" width="12" height="1.5"></rect></svg>';
+    }
+    if (type === "note") {
+      return '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.75"></circle><path d="M8 5v3.5"></path><path d="M8 11.5h.01"></path></svg>';
+    }
+    return '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.75 13 4.5v7L8 14.25 3 11.5v-7Z"></path><path d="M8 1.75v12.5"></path><path d="M3 4.5 8 7.25l5-2.75"></path></svg>';
   }
 
   function detailForNode(node) {
@@ -75,7 +89,8 @@
       handlers.onSelect(node);
     };
 
-    icon = el("span", "tree-icon tree-icon-" + node.type, iconForNode(node));
+    icon = el("span", "tree-icon tree-icon-" + node.type);
+    icon.innerHTML = iconMarkupForNode(node);
     item.appendChild(icon);
 
     title = el("span", "tree-title", node.name || node.id);
