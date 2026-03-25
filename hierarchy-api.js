@@ -62,10 +62,7 @@
     for (i = 0; i < sources.length; i++) {
       if (!sources[i] || typeof sources[i] !== "object") continue;
       for (j = 0; j < keys.length; j++) {
-        if (
-          sources[i][keys[j]] != null &&
-          String(sources[i][keys[j]]).trim()
-        ) {
+        if (sources[i][keys[j]] != null && String(sources[i][keys[j]]).trim()) {
           return String(sources[i][keys[j]]).trim();
         }
       }
@@ -95,10 +92,413 @@
     };
   }
 
+  function decodeIfcStringToken(token) {
+    var trimmed;
+    if (!token || token === "$" || token === "*") return "";
+    trimmed = String(token).trim();
+    if (!(trimmed.charAt(0) === "'" && trimmed.charAt(trimmed.length - 1) === "'")) {
+      return "";
+    }
+    trimmed = trimmed.slice(1, -1).replace(/''/g, "'");
+    trimmed = trimmed.replace(/\\X2\\([0-9A-Fa-f]+)\\X0\\/g, function (_, hex) {
+      var chars = [];
+      var i;
+      for (i = 0; i + 3 < hex.length; i += 4) {
+        chars.push(String.fromCharCode(parseInt(hex.slice(i, i + 4), 16)));
+      }
+      return chars.join("");
+    });
+    trimmed = trimmed.replace(/\\X\\([0-9A-Fa-f]{2})/g, function (_, hex) {
+      return String.fromCharCode(parseInt(hex, 16));
+    });
+    return trimmed.trim();
+  }
+
+  function splitTopLevel(input) {
+    var parts = [];
+    var current = "";
+    var depth = 0;
+    var inString = false;
+    var i;
+    var ch;
+    for (i = 0; i < input.length; i += 1) {
+      ch = input.charAt(i);
+      if (inString) {
+        current += ch;
+        if (ch === "'" && input.charAt(i + 1) === "'") {
+          current += input.charAt(i + 1);
+          i += 1;
+        } else if (ch === "'") {
+          inString = false;
+        }
+        continue;
+      }
+      if (ch === "'") {
+        inString = true;
+        current += ch;
+        continue;
+      }
+      if (ch === "(") {
+        depth += 1;
+        current += ch;
+        continue;
+      }
+      if (ch === ")") {
+        depth -= 1;
+        current += ch;
+        continue;
+      }
+      if (ch === "," && depth === 0) {
+        parts.push(current.trim());
+        current = "";
+        continue;
+      }
+      current += ch;
+    }
+    if (current.trim()) parts.push(current.trim());
+    return parts;
+  }
+
+  function extractIfcRecords(text) {
+    var clean = String(text || "").replace(/\/\*[\s\S]*?\*\//g, "");
+    var dataStart = clean.indexOf("DATA;");
+    var dataEnd = clean.lastIndexOf("ENDSEC;");
+    var slice = dataStart >= 0 && dataEnd > dataStart ? clean.slice(dataStart + 5, dataEnd) : clean;
+    var records = [];
+    var i = 0;
+    var hash;
+    var eq;
+    var depth;
+    var inString;
+    var end;
+    var j;
+    var ch;
+    while (i < slice.length) {
+      hash = slice.indexOf("#", i);
+      if (hash < 0) break;
+      eq = slice.indexOf("=", hash);
+      if (eq < 0) break;
+      depth = 0;
+      inString = false;
+      end = -1;
+      for (j = eq + 1; j < slice.length; j += 1) {
+        ch = slice.charAt(j);
+        if (inString) {
+          if (ch === "'" && slice.charAt(j + 1) === "'") {
+            j += 1;
+          } else if (ch === "'") {
+            inString = false;
+          }
+          continue;
+        }
+        if (ch === "'") {
+          inString = true;
+          continue;
+        }
+        if (ch === "(") {
+          depth += 1;
+          continue;
+        }
+        if (ch === ")") {
+          depth -= 1;
+          continue;
+        }
+        if (ch === ";" && depth === 0) {
+          end = j;
+          break;
+        }
+      }
+      if (end < 0) break;
+      records.push(slice.slice(hash, end + 1).trim());
+      i = end + 1;
+    }
+    return records;
+  }
+
+  function normalizeIfcClass(entityName) {
+    var upper = String(entityName || "").toUpperCase();
+    var overrides = {
+      IFCPROJECT: "IfcProject",
+      IFCSITE: "IfcSite",
+      IFCBUILDING: "IfcBuilding",
+      IFCBUILDINGSTOREY: "IfcBuildingStorey",
+      IFCROAD: "IfcRoad",
+      IFCROADPART: "IfcRoadPart",
+      IFCGEOMODEL: "IfcGeomodel",
+      IFCGEOTECHNICALSTRATUM: "IfcGeotechnicalStratum",
+      IFCELEMENTASSEMBLY: "IfcElementAssembly",
+      IFCPAVEMENT: "IfcPavement",
+      IFCEARTHWORKSFILL: "IfcEarthworksFill",
+    };
+    if (overrides[upper]) return overrides[upper];
+    if (upper.indexOf("IFC") !== 0) return String(entityName || "");
+    return "Ifc" + upper.slice(3).toLowerCase().replace(/(^|_)([a-z])/g, function (_, prefix, ch) {
+      return ch.toUpperCase();
+    });
+  }
+
+  function nodeTypeForClass(ifcClass) {
+    if (ifcClass === "IfcProject") return "project";
+    if (ifcClass === "IfcSite") return "site";
+    if (ifcClass === "IfcBuilding") return "building";
+    if (ifcClass === "IfcBuildingStorey") return "storey";
+    return "element";
+  }
+
+  function parseIfcRecords(records) {
+    var entities = {};
+    var parentByStep = {};
+    var childrenByStep = {};
+
+    asArray(records).forEach(function (record) {
+      var match = String(record || "").match(/^#(\d+)\s*=\s*([A-Z0-9_]+)\((.*)\);$/i);
+      var stepId;
+      var entityName;
+      var args;
+      var guid;
+      var name;
+      var ifcClass;
+      var parentRef;
+      var childRefs;
+      if (!match) return;
+      stepId = "#" + match[1];
+      entityName = String(match[2]).trim();
+      args = splitTopLevel(match[3]);
+      guid = decodeIfcStringToken(args[0]);
+      name = decodeIfcStringToken(args[2]);
+      ifcClass = normalizeIfcClass(entityName);
+
+      entities[stepId] = {
+        stepId: stepId,
+        entityName: entityName,
+        ifcClass: ifcClass,
+        guid: guid,
+        name: name,
+        args: args,
+      };
+
+      if (entityName === "IFCRELAGGREGATES") {
+        parentRef = String(args[4] || "").trim();
+        childRefs = String(args[5] || "").match(/#\d+/g) || [];
+        childRefs.forEach(function (childRef) {
+          parentByStep[childRef] = parentRef;
+          childrenByStep[parentRef] = childrenByStep[parentRef] || [];
+          childrenByStep[parentRef].push(childRef);
+        });
+      }
+
+      if (entityName === "IFCRELCONTAINEDINSPATIALSTRUCTURE") {
+        childRefs = String(args[4] || "").match(/#\d+/g) || [];
+        parentRef = String(args[5] || "").trim();
+        childRefs.forEach(function (childRef) {
+          if (!parentByStep[childRef]) parentByStep[childRef] = parentRef;
+          childrenByStep[parentRef] = childrenByStep[parentRef] || [];
+          childrenByStep[parentRef].push(childRef);
+        });
+      }
+    });
+
+    return {
+      entities: entities,
+      parentByStep: parentByStep,
+      childrenByStep: childrenByStep,
+    };
+  }
+
+  function buildIfcIndex(parsed, sourceFile) {
+    var entities = parsed.entities || {};
+    var parentByStep = parsed.parentByStep || {};
+    var childrenByStep = parsed.childrenByStep || {};
+    var nodes = {};
+    var guidToNodeIds = {};
+    var stepToNodeId = {};
+    var projectNode = null;
+
+    Object.keys(entities).forEach(function (stepId) {
+      var entity = entities[stepId];
+      var nodeId;
+      if (!entity.guid && !entity.ifcClass) return;
+      nodeId = entity.guid || stepId;
+      stepToNodeId[stepId] = nodeId;
+      nodes[nodeId] = {
+        id: nodeId,
+        guid: entity.guid || "",
+        stepId: stepId,
+        type: nodeTypeForClass(entity.ifcClass),
+        ifcClass: entity.ifcClass,
+        name: entity.name || entity.ifcClass || stepId,
+        parentId: null,
+        childrenIds: [],
+        sourceFile: sourceFile,
+      };
+      if (entity.guid) {
+        guidToNodeIds[entity.guid] = guidToNodeIds[entity.guid] || [];
+        guidToNodeIds[entity.guid].push(nodeId);
+      }
+    });
+
+    Object.keys(nodes).forEach(function (nodeId) {
+      var node = nodes[nodeId];
+      var parentStep = parentByStep[node.stepId];
+      var childSteps = childrenByStep[node.stepId] || [];
+      if (parentStep && stepToNodeId[parentStep]) {
+        node.parentId = stepToNodeId[parentStep];
+      }
+      node.childrenIds = childSteps
+        .map(function (childStep) {
+          return stepToNodeId[childStep];
+        })
+        .filter(Boolean);
+    });
+
+    Object.keys(nodes).some(function (nodeId) {
+      if (nodes[nodeId].ifcClass === "IfcProject" && !nodes[nodeId].parentId) {
+        projectNode = nodes[nodeId];
+        return true;
+      }
+      return false;
+    });
+
+    if (!projectNode) {
+      Object.keys(nodes).some(function (nodeId) {
+        if (nodes[nodeId].ifcClass === "IfcProject") {
+          projectNode = nodes[nodeId];
+          return true;
+        }
+        return false;
+      });
+    }
+
+    if (!projectNode) {
+      Object.keys(nodes).some(function (nodeId) {
+        if (!nodes[nodeId].parentId) {
+          projectNode = nodes[nodeId];
+          return true;
+        }
+        return false;
+      });
+    }
+
+    return {
+      generatedAt: new Date().toISOString(),
+      sourceFile: sourceFile,
+      rootId: projectNode ? projectNode.id : "",
+      nodes: nodes,
+      guidToNodeIds: guidToNodeIds,
+    };
+  }
+
+  function buildIfcIndexFromText(text, sourceFile) {
+    return buildIfcIndex(parseIfcRecords(extractIfcRecords(text)), sourceFile);
+  }
+
+  function mergeIfcIndexes(indexes) {
+    var active = asArray(indexes).filter(function (index) {
+      return index && index.nodes && index.rootId;
+    });
+    var combined = {
+      generatedAt: new Date().toISOString(),
+      rootId: "workspace::root",
+      sourceFiles: [],
+      sourceCount: active.length,
+      nodes: {
+        "workspace::root": {
+          id: "workspace::root",
+          type: "workspace",
+          name: "Models",
+          parentId: null,
+          childrenIds: [],
+          sourceFile: "",
+        },
+      },
+      guidToNodeIds: {},
+    };
+
+    active.forEach(function (sourceIndex, sourcePosition) {
+      var sourceName = firstString(sourceIndex.sourceFile, "IFC Model " + (sourcePosition + 1));
+      var modelId = "model::" + sourcePosition + "::" + sourceName;
+      var remap = {};
+      combined.sourceFiles.push(sourceName);
+      combined.nodes[combined.rootId].childrenIds.push(modelId);
+      combined.nodes[modelId] = {
+        id: modelId,
+        type: "model",
+        name: sourceName.replace(/\.ifc$/i, ""),
+        parentId: combined.rootId,
+        childrenIds: [],
+        sourceFile: sourceName,
+      };
+
+      Object.keys(sourceIndex.nodes || {}).forEach(function (originalId) {
+        remap[originalId] = "ifc::" + sourcePosition + "::" + originalId;
+      });
+
+      Object.keys(sourceIndex.nodes || {}).forEach(function (originalId) {
+        var sourceNode = sourceIndex.nodes[originalId];
+        var mappedId = remap[originalId];
+        combined.nodes[mappedId] = {
+          id: mappedId,
+          guid: sourceNode.guid || "",
+          stepId: sourceNode.stepId || "",
+          type: sourceNode.type || "element",
+          ifcClass: sourceNode.ifcClass || "",
+          name: sourceNode.name || sourceNode.ifcClass || originalId,
+          parentId: null,
+          childrenIds: asArray(sourceNode.childrenIds)
+            .map(function (childId) {
+              return remap[childId];
+            })
+            .filter(Boolean),
+          sourceFile: sourceName,
+        };
+      });
+
+      Object.keys(sourceIndex.nodes || {}).forEach(function (originalId) {
+        var sourceNode = sourceIndex.nodes[originalId];
+        var mappedId = remap[originalId];
+        combined.nodes[mappedId].parentId = sourceNode.parentId
+          ? remap[sourceNode.parentId]
+          : originalId === sourceIndex.rootId
+          ? modelId
+          : null;
+      });
+
+      if (sourceIndex.rootId && remap[sourceIndex.rootId]) {
+        combined.nodes[modelId].childrenIds.push(remap[sourceIndex.rootId]);
+      }
+
+      Object.keys(sourceIndex.guidToNodeIds || {}).forEach(function (guid) {
+        combined.guidToNodeIds[guid] = combined.guidToNodeIds[guid] || [];
+        asArray(sourceIndex.guidToNodeIds[guid]).forEach(function (originalId) {
+          if (remap[originalId]) combined.guidToNodeIds[guid].push(remap[originalId]);
+        });
+      });
+    });
+
+    return active.length ? combined : null;
+  }
+
+  function readFileText(file) {
+    if (file && typeof file.text === "function") return file.text();
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function () {
+        resolve(reader.result || "");
+      };
+      reader.onerror = function () {
+        reject(reader.error || new Error("Failed to read file"));
+      };
+      reader.readAsText(file);
+    });
+  }
+
   function HierarchyApi(api) {
     this.api = api || null;
-    this.ifcIndex = null;
-    this.ifcIndexPromise = null;
+    this.defaultIfcIndex = null;
+    this.defaultIfcIndexPromise = null;
+    this.uploadedIfcIndexes = [];
+    this.mergedIfcIndex = null;
+    this.mergedIfcIndexPromise = null;
   }
 
   HierarchyApi.prototype.probeCapabilities = function () {
@@ -112,45 +512,125 @@
       gotoObject: typeof a.gotoObject === "function",
       highlightObject: typeof a.highlightObject === "function",
       makeApiRequest: typeof a.makeApiRequest === "function",
+      localIfcUpload: true,
     };
   };
 
-  HierarchyApi.prototype.loadIfcIndex = function () {
-    var self = this;
-    if (this.ifcIndex) return Promise.resolve(this.ifcIndex);
-    if (this.ifcIndexPromise) return this.ifcIndexPromise;
-    if (typeof global.fetch !== "function") return Promise.resolve(null);
+  HierarchyApi.prototype.getIfcIndexSummary = function () {
+    var count = 0;
+    var names = [];
+    var defaultName = this.defaultIfcIndex && this.defaultIfcIndex.sourceFile;
+    var uploadedCount = 0;
+    if (defaultName) {
+      count += 1;
+      names.push(defaultName);
+    }
+    this.uploadedIfcIndexes.forEach(function (index) {
+      if (index && index.sourceFile) {
+        count += 1;
+        uploadedCount += 1;
+        names.push(index.sourceFile);
+      }
+    });
+    return {
+      sourceCount: count,
+      sourceFiles: names,
+      uploadedCount: uploadedCount,
+      defaultLoaded: !!defaultName,
+    };
+  };
 
-    this.ifcIndexPromise = global
+  HierarchyApi.prototype.invalidateIfcIndex = function () {
+    this.mergedIfcIndex = null;
+    this.mergedIfcIndexPromise = null;
+  };
+
+  HierarchyApi.prototype.loadDefaultIfcIndex = function () {
+    var self = this;
+    if (this.defaultIfcIndex !== null) return Promise.resolve(this.defaultIfcIndex);
+    if (this.defaultIfcIndexPromise) return this.defaultIfcIndexPromise;
+    if (typeof global.fetch !== "function") {
+      this.defaultIfcIndex = null;
+      return Promise.resolve(null);
+    }
+
+    this.defaultIfcIndexPromise = global
       .fetch("./hierarchy-index.json", { cache: "no-store" })
       .then(function (response) {
         if (!response || !response.ok) return null;
         return response.json();
       })
       .then(function (index) {
-        self.ifcIndex = index && index.nodes ? index : null;
-        return self.ifcIndex;
+        self.defaultIfcIndex = index && index.nodes ? index : null;
+        return self.defaultIfcIndex;
       })
       .catch(function () {
-        self.ifcIndex = null;
+        self.defaultIfcIndex = null;
         return null;
       });
 
-    return this.ifcIndexPromise;
+    return this.defaultIfcIndexPromise;
   };
 
-  HierarchyApi.prototype.getIfcModelRoot = function (index) {
-    var sourceFile = firstString(index && index.sourceFile, "IFC Model");
-    return {
-      id: "model::" + sourceFile,
-      type: "model",
-      name: sourceFile.replace(/.ifc$/i, ""),
-      hasChildren: true,
-      meta: {
-        source: "ifc-index",
-        sourceFile: sourceFile,
-      },
-    };
+  HierarchyApi.prototype.loadIfcFiles = function (files) {
+    var self = this;
+    var list = asArray(files);
+    if (!list.length) return Promise.resolve(this.getIfcIndexSummary());
+    return Promise.all(
+      list.map(function (file) {
+        return readFileText(file).then(function (text) {
+          return buildIfcIndexFromText(text, firstString(file && file.name, "uploaded.ifc"));
+        });
+      })
+    ).then(function (indexes) {
+      var byName = {};
+      self.uploadedIfcIndexes.forEach(function (index) {
+        if (index && index.sourceFile) byName[index.sourceFile] = index;
+      });
+      indexes.forEach(function (index) {
+        if (index && index.sourceFile) byName[index.sourceFile] = index;
+      });
+      self.uploadedIfcIndexes = Object.keys(byName)
+        .sort()
+        .map(function (name) {
+          return byName[name];
+        });
+      self.invalidateIfcIndex();
+      return self.loadIfcIndex().then(function () {
+        return self.getIfcIndexSummary();
+      });
+    });
+  };
+
+  HierarchyApi.prototype.clearUploadedIfcFiles = function () {
+    var self = this;
+    this.uploadedIfcIndexes = [];
+    this.invalidateIfcIndex();
+    return this.loadIfcIndex().then(function () {
+      return self.getIfcIndexSummary();
+    });
+  };
+
+  HierarchyApi.prototype.loadIfcIndex = function () {
+    var self = this;
+    if (this.mergedIfcIndex) return Promise.resolve(this.mergedIfcIndex);
+    if (this.mergedIfcIndexPromise) return this.mergedIfcIndexPromise;
+
+    this.mergedIfcIndexPromise = this.loadDefaultIfcIndex().then(function (defaultIndex) {
+      var uploadedNames = {};
+      var indexes = [];
+      self.uploadedIfcIndexes.forEach(function (index) {
+        if (index && index.sourceFile) uploadedNames[index.sourceFile] = true;
+      });
+      if (defaultIndex && (!defaultIndex.sourceFile || !uploadedNames[defaultIndex.sourceFile])) {
+        indexes.push(defaultIndex);
+      }
+      indexes = indexes.concat(self.uploadedIfcIndexes);
+      self.mergedIfcIndex = mergeIfcIndexes(indexes);
+      return self.mergedIfcIndex;
+    });
+
+    return this.mergedIfcIndexPromise;
   };
 
   HierarchyApi.prototype.mapIndexedNode = function (indexedNode) {
@@ -165,6 +645,7 @@
         objectId: firstString(indexedNode.guid, indexedNode.id),
         ifcClass: indexedNode.ifcClass,
         stepId: indexedNode.stepId,
+        sourceFile: indexedNode.sourceFile,
         raw: indexedNode,
       },
     };
@@ -175,12 +656,6 @@
     return this.loadIfcIndex().then(function (index) {
       var indexedNode;
       if (!index || !index.nodes) return null;
-      if (node && node.type === "model") {
-        if (index.rootId && index.nodes[index.rootId]) {
-          return [self.mapIndexedNode(index.nodes[index.rootId])].filter(Boolean);
-        }
-        return [];
-      }
       indexedNode = index.nodes[String(node && node.id)];
       if (!indexedNode) return null;
       return asArray(indexedNode.childrenIds)
@@ -201,25 +676,29 @@
       currentId = index.nodes[currentId].parentId ? String(index.nodes[currentId].parentId) : "";
     }
     path.reverse();
+    if (index.rootId && path.length && String(path[0].id) === String(index.rootId)) {
+      path.shift();
+    }
     return path;
   };
 
   HierarchyApi.prototype.resolvePathFromIfcIndex = function (identifiers) {
     var self = this;
     return this.loadIfcIndex().then(function (index) {
+      var nodeIds = [];
       var nodeId = "";
       if (!index || !index.nodes) return null;
       uniqueStrings(identifiers).some(function (identifier) {
         var value = String(identifier || "");
         if (!value) return false;
-        nodeId =
-          (index.guidToNodeId && index.guidToNodeId[value]) ||
-          (index.nodes[value] ? value : "");
+        nodeIds = asArray(index.guidToNodeIds && index.guidToNodeIds[value]);
+        if (!nodeIds.length && index.nodes[value]) nodeIds = [value];
+        nodeId = nodeIds.length ? String(nodeIds[0]) : "";
         return !!nodeId;
       });
       if (!nodeId) return null;
       return {
-        selectedId: String(nodeId),
+        selectedId: nodeId,
         path: self.buildPathFromIndexedNode(index, nodeId),
       };
     });
@@ -230,7 +709,7 @@
     var self = this;
     return this.loadIfcIndex().then(function (index) {
       if (index && index.rootId && index.nodes && index.nodes[index.rootId]) {
-        return self.getIfcModelRoot(index);
+        return self.mapIndexedNode(index.nodes[index.rootId]);
       }
       if (!api || typeof api.getProjectId !== "function") {
         return {
@@ -268,25 +747,23 @@
 
   HierarchyApi.prototype.fetchProjectChildren = function (projectNode) {
     var self = this;
-    return this.tryCollections(["/api/v1/buildings", "/api/v1/v2/buildings"]).then(
-      function (rows) {
-        if (rows.length) {
-          return [
-            {
-              id: projectNode.id + "::site::default",
-              type: "site",
-              name: "Site",
-              hasChildren: true,
-              meta: {
-                source: "buildings-endpoint",
-                buildings: rows,
-              },
+    return this.tryCollections(["/api/v1/buildings", "/api/v1/v2/buildings"]).then(function (rows) {
+      if (rows.length) {
+        return [
+          {
+            id: projectNode.id + "::site::default",
+            type: "site",
+            name: "Site",
+            hasChildren: true,
+            meta: {
+              source: "buildings-endpoint",
+              buildings: rows,
             },
-          ];
-        }
-        return self.fallbackSiteNode(projectNode);
+          },
+        ];
       }
-    );
+      return self.fallbackSiteNode(projectNode);
+    });
   };
 
   HierarchyApi.prototype.fallbackSiteNode = function (projectNode) {
@@ -344,7 +821,6 @@
   HierarchyApi.prototype.fetchBuildingChildren = function (buildingNode) {
     var api = this.api || {};
     var self = this;
-
     if (typeof api.getFloors === "function") {
       return api.getFloors().then(function (floors) {
         var mapped = self.mapFloorRows(asArray(floors), buildingNode.id, "getFloors");
@@ -352,7 +828,6 @@
         return self.fetchBuildingChildrenFromApi(buildingNode);
       });
     }
-
     return this.fetchBuildingChildrenFromApi(buildingNode);
   };
 
@@ -391,12 +866,7 @@
           floor && floor.name,
           floor && floor.title
         );
-        var floorName = firstString(
-          floor && floor.name,
-          floor && floor.title,
-          floorId,
-          "Storey"
-        );
+        var floorName = firstString(floor && floor.name, floor && floor.title, floorId, "Storey");
         if (!floorId) return null;
         return {
           id: String(floorId),
@@ -486,18 +956,17 @@
   HierarchyApi.prototype.bestEffortGetObjectInfo = function (picked) {
     var api = this.api || {};
     var identifiers = this.extractPickedObjectCandidates(picked);
-    var self = this;
     var index = 0;
-
     if (typeof api.getObjectInfo !== "function") {
       return Promise.resolve({ detail: null, identifiers: identifiers });
     }
 
     function next() {
+      var identifier;
       if (index >= identifiers.length) {
         return Promise.resolve({ detail: null, identifiers: identifiers });
       }
-      var identifier = identifiers[index++];
+      identifier = identifiers[index++];
       return api.getObjectInfo(identifier).then(
         function (detail) {
           return {
@@ -524,12 +993,7 @@
 
   HierarchyApi.prototype.pathHasHierarchyContext = function (path) {
     return asArray(path).some(function (node) {
-      return (
-        node &&
-        (node.type === "site" ||
-          node.type === "building" ||
-          node.type === "storey")
-      );
+      return node && (node.type === "site" || node.type === "building" || node.type === "storey");
     });
   };
 
@@ -715,16 +1179,15 @@
   HierarchyApi.prototype.tryCollections = function (paths) {
     var self = this;
     var index = 0;
-
     function next() {
+      var path;
       if (index >= paths.length) return Promise.resolve([]);
-      var path = paths[index++];
+      path = paths[index++];
       return self.tryJsonApiCollection(path).then(function (rows) {
         if (rows.length) return rows;
         return next();
       });
     }
-
     return next();
   };
 

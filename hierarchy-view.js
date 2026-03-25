@@ -10,13 +10,14 @@
 
   function iconForNode(node) {
     var type = node && node.type ? String(node.type) : "node";
-    if (type === "model") return "▦";
-    if (type === "project") return "⌘";
-    if (type === "site") return "⌂";
-    if (type === "building") return "▤";
-    if (type === "storey") return "≡";
+    if (type === "model") return "M";
+    if (type === "project") return "P";
+    if (type === "site") return "S";
+    if (type === "building") return "B";
+    if (type === "storey") return "L";
+    if (type === "workspace") return "W";
     if (type === "note") return "!";
-    return "◻";
+    return "[]";
   }
 
   function detailForNode(node) {
@@ -55,7 +56,7 @@
     inSelectedPath = state.selectedPath.indexOf(nodeId) >= 0;
 
     if (node.hasChildren) {
-      toggle = el("button", "tree-toggle", expanded ? "▾" : "▸");
+      toggle = el("button", "tree-toggle", expanded ? "-" : "+");
       toggle.onclick = function (event) {
         event.stopPropagation();
         handlers.onToggle(nodeId);
@@ -109,16 +110,55 @@
     return fragment;
   }
 
+  function renderTreeContent(state, handlers) {
+    var root = state.rootId && state.nodesById[state.rootId];
+    var fragment = document.createDocumentFragment();
+
+    if (!root) return null;
+
+    if (root.type === "workspace" && root.childrenIds && root.childrenIds.length) {
+      root.childrenIds.forEach(function (childId) {
+        var child = renderNode(state, childId, 0, handlers);
+        if (child) fragment.appendChild(child);
+      });
+      return fragment;
+    }
+
+    return renderNode(state, root.id, 0, handlers);
+  }
+
+  function capabilityList(capabilities) {
+    var keys = [];
+    Object.keys(capabilities || {}).forEach(function (key) {
+      if (capabilities[key]) keys.push(key);
+    });
+    return keys;
+  }
+
+  function formatIfcSummary(summary) {
+    var count = summary && summary.sourceCount ? summary.sourceCount : 0;
+    var uploaded = summary && summary.uploadedCount ? summary.uploadedCount : 0;
+    var defaultLoaded = !!(summary && summary.defaultLoaded);
+    if (!count) return "No IFC";
+    if (defaultLoaded && uploaded) return count + " IFC (1 bundled + " + uploaded + " uploaded)";
+    if (uploaded) return uploaded + " uploaded IFC" + (uploaded === 1 ? "" : "s");
+    return count + " bundled IFC";
+  }
+
   function HierarchyView(rootEl, store, api) {
     this.rootEl = rootEl;
     this.store = store;
     this.api = api || {};
     this.statusEl = document.getElementById("status");
     this.metaEl = document.getElementById("meta");
+    this.ifcSummaryEl = document.getElementById("ifc-summary");
     this.treeEl = document.getElementById("tree");
     this.collapseBtn = document.getElementById("collapse-all");
     this.expand2Btn = document.getElementById("expand-2");
     this.expand4Btn = document.getElementById("expand-4");
+    this.loadBtn = document.getElementById("load-ifc");
+    this.clearBtn = document.getElementById("clear-ifc");
+    this.fileInput = document.getElementById("ifc-files");
     this.bind();
   }
 
@@ -142,25 +182,50 @@
         self.store.expandToDepth(4);
       };
     }
+    if (this.loadBtn && this.fileInput) {
+      this.loadBtn.onclick = function () {
+        self.fileInput.click();
+      };
+      this.fileInput.onchange = function (event) {
+        var files = Array.prototype.slice.call((event.target && event.target.files) || []);
+        if (files.length) self.store.loadIfcFiles(files);
+        self.fileInput.value = "";
+      };
+    }
+    if (this.clearBtn) {
+      this.clearBtn.onclick = function () {
+        self.store.clearIfcFiles();
+      };
+    }
   };
 
   HierarchyView.prototype.render = function (state) {
     var self = this;
-    var caps = [];
+    var caps = capabilityList(state.capabilities);
+    var ifcSummary = state.ifcSummary || { sourceCount: 0, sourceFiles: [] };
+    var tooltipLines = [];
     var content;
 
     this.treeEl.innerHTML = "";
     this.statusEl.textContent = state.statusMessage || "Ready";
     this.statusEl.className = state.error ? "footer-status err" : "footer-status ok";
 
-    Object.keys(state.capabilities).forEach(function (key) {
-      if (state.capabilities[key]) caps.push(key);
-    });
-    this.metaEl.textContent = "API";
-    this.metaEl.title = "Capabilities: " + (caps.join(", ") || "none");
+    if (this.ifcSummaryEl) {
+      this.ifcSummaryEl.textContent = formatIfcSummary(ifcSummary);
+      this.ifcSummaryEl.title = (ifcSummary.sourceFiles || []).join("\n") || "No IFC sources loaded";
+    }
+
+    tooltipLines.push("IFC sources: " + ((ifcSummary.sourceFiles || []).join(", ") || "none"));
+    tooltipLines.push("Capabilities: " + (caps.join(", ") || "none"));
+    this.metaEl.textContent = (ifcSummary.sourceCount || 0) + " IFC";
+    this.metaEl.title = tooltipLines.join("\n");
+
+    if (this.clearBtn) {
+      this.clearBtn.disabled = !(ifcSummary.uploadedCount > 0);
+    }
 
     if (!state.rootId) return;
-    content = renderNode(state, state.rootId, 0, {
+    content = renderTreeContent(state, {
       onToggle: this.store.toggle.bind(this.store),
       onSelect: this.onSelectNode.bind(this),
     });

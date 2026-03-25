@@ -63,6 +63,7 @@
       .toolbar {
         gap: 6px;
         padding: 5px 8px;
+        flex-wrap: wrap;
       }
       .tool-btn {
         border: 1px solid #cbd4de;
@@ -73,8 +74,18 @@
         font-size: 11px;
         cursor: pointer;
       }
-      .tool-btn:hover {
+      .tool-btn:hover:not(:disabled) {
         border-color: #9caec0;
+      }
+      .tool-btn:disabled {
+        cursor: default;
+        opacity: 0.55;
+      }
+      .toolbar-note {
+        margin-left: auto;
+        font-size: 10px;
+        color: var(--muted);
+        white-space: nowrap;
       }
       .columns {
         padding: 4px 10px;
@@ -130,6 +141,7 @@
         min-height: 24px;
         padding: 2px 6px;
         cursor: pointer;
+        min-width: 0;
       }
       .tree-item:hover {
         background: #eef4fb;
@@ -204,6 +216,10 @@
         <button id="collapse-all" class="tool-btn">Collapse</button>
         <button id="expand-2" class="tool-btn">Expand 2</button>
         <button id="expand-4" class="tool-btn">Expand 4</button>
+        <button id="load-ifc" class="tool-btn">Load IFC files</button>
+        <button id="clear-ifc" class="tool-btn">Clear uploads</button>
+        <input id="ifc-files" type="file" accept=".ifc" multiple style="display: none" />
+        <span id="ifc-summary" class="toolbar-note">No IFC</span>
       </div>
       <div class="columns">
         <span class="columns-name">Name</span>
@@ -212,7 +228,7 @@
       <div id="tree" class="tree"></div>
       <div class="footer">
         <span id="status" class="footer-status ok">Starting...</span>
-        <span id="meta" class="footer-meta" title="Capabilities: none">API</span>
+        <span id="meta" class="footer-meta" title="Capabilities: none">0 IFC</span>
       </div>
     </div>
 
@@ -266,3 +282,4 @@
     </script>
   </body>
 </html>
+

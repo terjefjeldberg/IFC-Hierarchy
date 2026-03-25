@@ -1,6 +1,11 @@
 ﻿(function (global) {
   "use strict";
 
+  function formatIfcSummary(summary) {
+    var count = summary && summary.sourceCount ? summary.sourceCount : 0;
+    return count === 1 ? "1 IFC source" : String(count) + " IFC sources";
+  }
+
   function HierarchyStore(apiAdapter) {
     this.apiAdapter = apiAdapter;
     this.nodesById = {};
@@ -30,7 +35,18 @@
       selectedId: this.selectedId,
       selectedPath: this.selectedPath,
       capabilities: this.capabilities,
+      ifcSummary: this.apiAdapter.getIfcIndexSummary(),
     };
+  };
+
+  HierarchyStore.prototype.resetTreeState = function () {
+    this.nodesById = {};
+    this.rootId = null;
+    this.expanded = {};
+    this.loading = {};
+    this.error = "";
+    this.selectedId = "";
+    this.selectedPath = [];
   };
 
   HierarchyStore.prototype.upsertNode = function (node, parentId) {
@@ -81,10 +97,10 @@
     this.emit();
   };
 
-  HierarchyStore.prototype.init = function () {
+  HierarchyStore.prototype.reloadTree = function (initialStatus) {
     var self = this;
     this.error = "";
-    this.statusMessage = "Loading IFC hierarchy...";
+    this.statusMessage = initialStatus || "Loading IFC hierarchy...";
     this.emit();
     return this.apiAdapter
       .fetchRoot()
@@ -105,6 +121,54 @@
       })
       .catch(function (err) {
         self.error = err && err.message ? err.message : "Failed to initialize";
+        self.statusMessage = self.error;
+        self.emit();
+      });
+  };
+
+  HierarchyStore.prototype.init = function () {
+    return this.reloadTree("Loading IFC hierarchy...");
+  };
+
+  HierarchyStore.prototype.loadIfcFiles = function (files) {
+    var self = this;
+    this.error = "";
+    this.statusMessage = "Loading selected IFC files...";
+    this.emit();
+    return this.apiAdapter
+      .loadIfcFiles(files)
+      .then(function (summary) {
+        self.resetTreeState();
+        return self.reloadTree("Loading IFC hierarchy...").then(function () {
+          self.statusMessage = "Loaded " + formatIfcSummary(summary);
+          self.emit();
+        });
+      })
+      .catch(function (err) {
+        self.error = err && err.message ? err.message : "Failed to load IFC files";
+        self.statusMessage = self.error;
+        self.emit();
+      });
+  };
+
+  HierarchyStore.prototype.clearIfcFiles = function () {
+    var self = this;
+    this.error = "";
+    this.statusMessage = "Clearing uploaded IFC files...";
+    this.emit();
+    return this.apiAdapter
+      .clearUploadedIfcFiles()
+      .then(function (summary) {
+        self.resetTreeState();
+        return self.reloadTree("Loading IFC hierarchy...").then(function () {
+          self.statusMessage = summary && summary.sourceCount
+            ? "Loaded " + formatIfcSummary(summary)
+            : "Cleared uploaded IFC files";
+          self.emit();
+        });
+      })
+      .catch(function (err) {
+        self.error = err && err.message ? err.message : "Failed to clear uploaded IFC files";
         self.statusMessage = self.error;
         self.emit();
       });
@@ -171,7 +235,7 @@
     this.emit();
     return visit(this.rootId, 0).then(function () {
       self.statusMessage = self.selectedId
-        ? "Selected: " + (self.nodesById[self.selectedId] && self.nodesById[self.selectedId].name || self.selectedId)
+        ? "Selected: " + ((self.nodesById[self.selectedId] && self.nodesById[self.selectedId].name) || self.selectedId)
         : "Ready";
       self.emit();
     });
@@ -220,3 +284,4 @@
 
   global.HierarchyStore = HierarchyStore;
 })(window);
+
