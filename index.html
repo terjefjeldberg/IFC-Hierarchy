@@ -7,33 +7,36 @@
     <title>IFC Hierarchy</title>
     <style>
       :root {
-        --bg: #0d1117;
-        --panel: #151b24;
-        --line: #293241;
-        --text: #ecf2f8;
-        --muted: #8b98ab;
+        --bg: #0f141a;
+        --panel: #161d25;
+        --panel-2: #1c2530;
+        --line: #2d3947;
+        --text: #edf3f9;
+        --muted: #8d9bab;
+        --accent: #8ecbff;
+        --accent-2: #63d2a1;
         --warn: #ffb454;
-        --err: #ff6b6b;
-        --accent: #57d3a0;
-        --selected: #22344b;
+        --err: #ff7575;
+        --selected: #1f3348;
+        --path: #18232e;
       }
       html,
       body {
         margin: 0;
         height: 100%;
-        background: radial-gradient(circle at top, #152034 0, var(--bg) 58%);
+        background: linear-gradient(180deg, #15202d 0%, var(--bg) 62%);
         color: var(--text);
-        font-family: Consolas, "Courier New", monospace;
+        font-family: "Segoe UI", Tahoma, sans-serif;
       }
       .app {
         height: 100%;
         display: grid;
-        grid-template-rows: auto auto auto 1fr;
+        grid-template-rows: auto auto auto auto 1fr auto;
       }
       .top {
+        padding: 14px 16px 12px;
         border-bottom: 1px solid var(--line);
-        padding: 12px 14px;
-        background: rgba(13, 17, 23, 0.85);
+        background: rgba(15, 20, 26, 0.92);
       }
       .title {
         margin: 0;
@@ -45,75 +48,148 @@
         font-size: 11px;
         color: var(--muted);
       }
+      .toolbar,
       .status,
       .caps,
+      .selection,
       .hint {
-        font-size: 12px;
-        padding: 8px 12px;
         border-bottom: 1px solid var(--line);
         background: var(--panel);
       }
+      .toolbar {
+        display: flex;
+        gap: 8px;
+        padding: 8px 12px;
+      }
+      .tool-btn {
+        border: 1px solid var(--line);
+        background: var(--panel-2);
+        color: var(--text);
+        border-radius: 6px;
+        padding: 6px 10px;
+        font-size: 11px;
+        cursor: pointer;
+      }
+      .tool-btn:hover {
+        border-color: #4b6077;
+      }
+      .status,
+      .caps,
+      .selection,
+      .hint {
+        padding: 8px 12px;
+        font-size: 12px;
+      }
       .status.ok {
-        color: var(--accent);
+        color: var(--accent-2);
       }
       .status.err {
         color: var(--err);
       }
-      .caps {
-        color: var(--warn);
-        font-size: 11px;
-      }
+      .caps,
       .hint {
         color: var(--muted);
         font-size: 11px;
       }
+      .selection {
+        background: var(--path);
+      }
+      .selection-label {
+        display: block;
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--muted);
+        margin-bottom: 4px;
+      }
+      .selection-path {
+        font-size: 12px;
+        color: var(--text);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
       .tree {
         overflow: auto;
-        padding: 10px 0 24px;
-        background: rgba(21, 27, 36, 0.95);
+        padding: 10px 8px 28px;
+        background: rgba(22, 29, 37, 0.96);
       }
       .tree-row {
         display: flex;
-        align-items: center;
-        gap: 6px;
-        min-height: 30px;
-        padding-right: 8px;
+        align-items: stretch;
+        gap: 8px;
+        min-height: 34px;
+        margin-left: calc(var(--depth) * 16px);
+        position: relative;
       }
       .tree-toggle,
-      .tree-label {
+      .tree-card {
         border: 1px solid var(--line);
-        background: #0f141c;
-        color: var(--text);
-        cursor: pointer;
+        border-radius: 8px;
       }
       .tree-toggle {
-        width: 22px;
-        height: 22px;
-        padding: 0;
-      }
-      .tree-label {
-        min-height: 22px;
-        text-align: left;
-        padding: 0 8px;
-      }
-      .tree-label-selected {
-        background: var(--selected);
-        border-color: #3e5b7f;
-      }
-      .tree-label-note {
-        color: var(--warn);
-      }
-      .tree-label-ifc-class {
-        color: #8ecbff;
+        width: 26px;
+        min-width: 26px;
+        height: 26px;
+        margin-top: 4px;
+        background: var(--panel-2);
+        color: var(--accent);
+        cursor: pointer;
       }
       .tree-spacer {
-        display: inline-block;
-        width: 22px;
+        width: 26px;
+        min-width: 26px;
       }
-      .tree-loading,
-      .tree-source {
+      .tree-card {
+        flex: 1;
+        min-width: 0;
+        background: #10171f;
+        color: var(--text);
+        text-align: left;
+        padding: 7px 10px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        cursor: pointer;
+      }
+      .tree-card:hover {
+        border-color: #49617b;
+        background: #13202b;
+      }
+      .tree-card-in-path {
+        border-color: #3b556e;
+      }
+      .tree-card-selected {
+        background: var(--selected);
+        border-color: var(--accent);
+        box-shadow: inset 3px 0 0 var(--accent);
+      }
+      .tree-kind {
+        font-size: 10px;
+        line-height: 1;
+        padding: 4px 6px;
+        border-radius: 999px;
+        background: #213142;
+        color: var(--accent);
+        white-space: nowrap;
+      }
+      .tree-name {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 13px;
+      }
+      .tree-meta,
+      .tree-loading {
         font-size: 10px;
         color: var(--muted);
+        white-space: nowrap;
+      }
+      .tree-card-note .tree-kind {
+        background: #3a2d1a;
+        color: var(--warn);
       }
     </style>
   </head>
@@ -121,14 +197,23 @@
     <div class="app">
       <div class="top">
         <h1 class="title">IFC Hierarchy</h1>
-        <div class="subtitle">IFC-backed hierarchy with StreamBIM selection focus</div>
+        <div class="subtitle">Full IFC tree from hierarchy-index.json, with focus on selected StreamBIM objects.</div>
+      </div>
+      <div class="toolbar">
+        <button id="collapse-all" class="tool-btn">Collapse all</button>
+        <button id="expand-2" class="tool-btn">Expand 2 levels</button>
+        <button id="expand-4" class="tool-btn">Expand 4 levels</button>
       </div>
       <div id="status" class="status ok">Starting...</div>
       <div id="capabilities" class="caps">Capabilities: none</div>
+      <div class="selection">
+        <span class="selection-label">Selected path</span>
+        <div id="selection-path" class="selection-path">No object selected</div>
+      </div>
       <div id="tree" class="tree"></div>
     </div>
     <div class="hint">
-      Click an object in StreamBIM to focus its path. If hierarchy-index.json is present, the tree uses the IFC file structure directly.
+      Click an object in StreamBIM to focus and highlight it in the IFC tree. The tree uses the indexed IFC hierarchy when `hierarchy-index.json` is present.
     </div>
 
     <script src="./streambim-widget-api.min.js"></script>
@@ -181,5 +266,3 @@
     </script>
   </body>
 </html>
-
-
