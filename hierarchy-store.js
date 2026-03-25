@@ -260,6 +260,12 @@
         var i;
         if (!parentId) return;
 
+        if (!path.length) {
+          self.statusMessage = (result && result.message) || "Selected object is not present in the loaded IFC hierarchy";
+          self.emit();
+          return;
+        }
+
         self.expanded[parentId] = true;
         for (i = 0; i < path.length; i++) {
           var row = self.upsertNode(path[i], parentId);

@@ -1003,10 +1003,27 @@
   HierarchyApi.prototype.resolvePickedObjectPath = function (picked) {
     var self = this;
     var pickedIdentifiers = this.extractPickedObjectCandidates(picked);
+    var ifcSummary = this.getIfcIndexSummary();
+    var hasIfcSources = !!(ifcSummary && ifcSummary.sourceCount);
     return this.resolvePathFromIfcIndex(pickedIdentifiers).then(function (indexedResult) {
       var directPath;
       if (indexedResult && indexedResult.path && indexedResult.path.length) {
+        indexedResult.pathSource = "ifc-index";
         return indexedResult;
+      }
+
+      if (hasIfcSources) {
+        return self.bestEffortGetObjectInfo(picked).then(function (result) {
+          var selectedId = firstString(result && result.selectedId, pickedIdentifiers[0]);
+          return {
+            selectedId: selectedId,
+            path: [],
+            pathSource: "missing-from-ifc",
+            message: selectedId
+              ? "Selected object is not present in the loaded IFC hierarchy"
+              : "Selected object could not be matched to the loaded IFC files",
+          };
+        });
       }
 
       directPath = self.derivePathFromObject({}, pickedIdentifiers, picked);
@@ -1014,6 +1031,7 @@
         return {
           selectedId: directPath[directPath.length - 1].id,
           path: directPath,
+          pathSource: "selected-object",
         };
       }
 
@@ -1033,11 +1051,13 @@
                 meta: { source: "selection-fallback" },
               },
             ],
+            pathSource: "selection-fallback",
           };
         }
         return {
           selectedId: path[path.length - 1].id,
           path: path,
+          pathSource: "selected-object",
         };
       });
     });
