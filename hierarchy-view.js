@@ -8,6 +8,15 @@
     return node;
   }
 
+  function buildLabelText(node) {
+    var ifcClass = node && node.meta && node.meta.ifcClass ? String(node.meta.ifcClass) : "";
+    var name = node && node.name ? String(node.name) : "";
+    if (ifcClass && name && ifcClass !== name) {
+      return "[" + node.type.toUpperCase() + "] " + ifcClass + ": " + name;
+    }
+    return "[" + node.type.toUpperCase() + "] " + name;
+  }
+
   function renderNode(state, nodeId, depth, handlers) {
     var node = state.nodesById[nodeId];
     if (!node) return null;
@@ -33,11 +42,7 @@
     if (state.selectedId && String(state.selectedId) === String(nodeId)) {
       className += " tree-label-selected";
     }
-    var label = el(
-      "button",
-      className,
-      "[" + node.type.toUpperCase() + "] " + node.name
-    );
+    var label = el("button", className, buildLabelText(node));
     label.onclick = function () {
       handlers.onSelect(node);
     };

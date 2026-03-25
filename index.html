@@ -121,14 +121,14 @@
     <div class="app">
       <div class="top">
         <h1 class="title">IFC Hierarchy</h1>
-        <div class="subtitle">Project -> Site -> Building -> Storey -> Element</div>
+        <div class="subtitle">IFC-backed hierarchy with StreamBIM selection focus</div>
       </div>
       <div id="status" class="status ok">Starting...</div>
       <div id="capabilities" class="caps">Capabilities: none</div>
       <div id="tree" class="tree"></div>
     </div>
     <div class="hint">
-      Click an object in StreamBIM to focus its hierarchy path in this tree.
+      Click an object in StreamBIM to focus its path. If hierarchy-index.json is present, the tree uses the IFC file structure directly.
     </div>
 
     <script src="./streambim-widget-api.min.js"></script>
@@ -181,4 +181,5 @@
     </script>
   </body>
 </html>
+
 

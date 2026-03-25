@@ -31,7 +31,7 @@ jobs:
       - name: Prepare site
         run: |
           mkdir site
-          cp index.html hierarchy-api.js hierarchy-store.js hierarchy-view.js streambim-widget-api.min.js README.md site/
+          cp index.html hierarchy-api.js hierarchy-store.js hierarchy-view.js hierarchy-index.json streambim-widget-api.min.js README.md site/
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
@@ -41,3 +41,4 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+

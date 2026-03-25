@@ -97,6 +97,8 @@
 
   function HierarchyApi(api) {
     this.api = api || null;
+    this.ifcIndex = null;
+    this.ifcIndexPromise = null;
   }
 
   HierarchyApi.prototype.probeCapabilities = function () {
@@ -113,35 +115,138 @@
     };
   };
 
-  HierarchyApi.prototype.fetchRoot = function () {
-    var api = this.api;
-    if (!api || typeof api.getProjectId !== "function") {
-      return Promise.resolve({
-        id: "project-unknown",
-        type: "project",
-        name: "Project",
-        hasChildren: true,
-        meta: { source: "fallback-root" },
+  HierarchyApi.prototype.loadIfcIndex = function () {
+    var self = this;
+    if (this.ifcIndex) return Promise.resolve(this.ifcIndex);
+    if (this.ifcIndexPromise) return this.ifcIndexPromise;
+    if (typeof global.fetch !== "function") return Promise.resolve(null);
+
+    this.ifcIndexPromise = global
+      .fetch("./hierarchy-index.json", { cache: "no-store" })
+      .then(function (response) {
+        if (!response || !response.ok) return null;
+        return response.json();
+      })
+      .then(function (index) {
+        self.ifcIndex = index && index.nodes ? index : null;
+        return self.ifcIndex;
+      })
+      .catch(function () {
+        self.ifcIndex = null;
+        return null;
       });
+
+    return this.ifcIndexPromise;
+  };
+
+  HierarchyApi.prototype.mapIndexedNode = function (indexedNode) {
+    if (!indexedNode) return null;
+    return {
+      id: String(indexedNode.id),
+      type: indexedNode.type || "element",
+      name: firstString(indexedNode.name, indexedNode.ifcClass, indexedNode.id),
+      hasChildren: asArray(indexedNode.childrenIds).length > 0,
+      meta: {
+        source: "ifc-index",
+        objectId: firstString(indexedNode.guid, indexedNode.id),
+        ifcClass: indexedNode.ifcClass,
+        stepId: indexedNode.stepId,
+        raw: indexedNode,
+      },
+    };
+  };
+
+  HierarchyApi.prototype.fetchChildrenFromIfcIndex = function (node) {
+    var self = this;
+    return this.loadIfcIndex().then(function (index) {
+      var indexedNode;
+      if (!index || !index.nodes) return null;
+      indexedNode = index.nodes[String(node && node.id)];
+      if (!indexedNode) return null;
+      return asArray(indexedNode.childrenIds)
+        .map(function (childId) {
+          return self.mapIndexedNode(index.nodes[String(childId)]);
+        })
+        .filter(Boolean);
+    });
+  };
+
+  HierarchyApi.prototype.buildPathFromIndexedNode = function (index, nodeId) {
+    var path = [];
+    var seen = {};
+    var currentId = String(nodeId || "");
+    while (currentId && index.nodes[currentId] && !seen[currentId]) {
+      seen[currentId] = true;
+      path.push(this.mapIndexedNode(index.nodes[currentId]));
+      currentId = index.nodes[currentId].parentId ? String(index.nodes[currentId].parentId) : "";
     }
-    return api.getProjectId().then(function (projectId) {
+    path.reverse();
+    if (index.rootId && path.length && String(path[0].id) === String(index.rootId)) {
+      path.shift();
+    }
+    return path;
+  };
+
+  HierarchyApi.prototype.resolvePathFromIfcIndex = function (identifiers) {
+    var self = this;
+    return this.loadIfcIndex().then(function (index) {
+      var nodeId = "";
+      if (!index || !index.nodes) return null;
+      uniqueStrings(identifiers).some(function (identifier) {
+        var value = String(identifier || "");
+        if (!value) return false;
+        nodeId =
+          (index.guidToNodeId && index.guidToNodeId[value]) ||
+          (index.nodes[value] ? value : "");
+        return !!nodeId;
+      });
+      if (!nodeId) return null;
       return {
-        id: String(projectId || "project-unknown"),
-        type: "project",
-        name: "Project " + String(projectId || "unknown"),
-        hasChildren: true,
-        meta: { source: "getProjectId" },
+        selectedId: String(nodeId),
+        path: self.buildPathFromIndexedNode(index, nodeId),
       };
     });
   };
 
+  HierarchyApi.prototype.fetchRoot = function () {
+    var api = this.api;
+    var self = this;
+    return this.loadIfcIndex().then(function (index) {
+      if (index && index.rootId && index.nodes && index.nodes[index.rootId]) {
+        return self.mapIndexedNode(index.nodes[index.rootId]);
+      }
+      if (!api || typeof api.getProjectId !== "function") {
+        return {
+          id: "project-unknown",
+          type: "project",
+          name: "Project",
+          hasChildren: true,
+          meta: { source: "fallback-root" },
+        };
+      }
+      return api.getProjectId().then(function (projectId) {
+        return {
+          id: String(projectId || "project-unknown"),
+          type: "project",
+          name: "Project " + String(projectId || "unknown"),
+          hasChildren: true,
+          meta: { source: "getProjectId" },
+        };
+      });
+    });
+  };
+
   HierarchyApi.prototype.fetchChildren = function (node) {
+    var self = this;
     if (!node) return Promise.resolve([]);
-    if (node.type === "project") return this.fetchProjectChildren(node);
-    if (node.type === "site") return this.fetchSiteChildren(node);
-    if (node.type === "building") return this.fetchBuildingChildren(node);
-    if (node.type === "storey") return this.fetchStoreyChildren(node);
-    return Promise.resolve([]);
+    return this.fetchChildrenFromIfcIndex(node).then(function (indexedChildren) {
+      if (indexedChildren) return indexedChildren;
+      if (node.type === "project") return self.fetchProjectChildren(node);
+      if (node.type === "site") return self.fetchSiteChildren(node);
+      if (node.type === "building") return self.fetchBuildingChildren(node);
+      if (node.type === "storey") return self.fetchStoreyChildren(node);
+      return [];
+    });
   };
 
   HierarchyApi.prototype.fetchProjectChildren = function (projectNode) {
@@ -414,37 +519,43 @@
   HierarchyApi.prototype.resolvePickedObjectPath = function (picked) {
     var self = this;
     var pickedIdentifiers = this.extractPickedObjectCandidates(picked);
-    var directPath = this.derivePathFromObject({}, pickedIdentifiers, picked);
+    return this.resolvePathFromIfcIndex(pickedIdentifiers).then(function (indexedResult) {
+      var directPath;
+      if (indexedResult && indexedResult.path && indexedResult.path.length) {
+        return indexedResult;
+      }
 
-    if (this.pathHasHierarchyContext(directPath)) {
-      return Promise.resolve({
-        selectedId: directPath[directPath.length - 1].id,
-        path: directPath,
-      });
-    }
-
-    return this.bestEffortGetObjectInfo(picked).then(function (result) {
-      var detail = result.detail || {};
-      var identifiers = result.identifiers || [];
-      var path = self.derivePathFromObject(detail, identifiers, picked);
-      if (!path.length) {
+      directPath = self.derivePathFromObject({}, pickedIdentifiers, picked);
+      if (self.pathHasHierarchyContext(directPath)) {
         return {
-          selectedId: firstString(result.selectedId, identifiers[0]),
-          path: [
-            {
-              id: "selection::missing",
-              type: "note",
-              name: "Clicked object could not be resolved to hierarchy",
-              hasChildren: false,
-              meta: { source: "selection-fallback" },
-            },
-          ],
+          selectedId: directPath[directPath.length - 1].id,
+          path: directPath,
         };
       }
-      return {
-        selectedId: path[path.length - 1].id,
-        path: path,
-      };
+
+      return self.bestEffortGetObjectInfo(picked).then(function (result) {
+        var detail = result.detail || {};
+        var identifiers = result.identifiers || [];
+        var path = self.derivePathFromObject(detail, identifiers, picked);
+        if (!path.length) {
+          return {
+            selectedId: firstString(result.selectedId, identifiers[0]),
+            path: [
+              {
+                id: "selection::missing",
+                type: "note",
+                name: "Clicked object could not be resolved to hierarchy",
+                hasChildren: false,
+                meta: { source: "selection-fallback" },
+              },
+            ],
+          };
+        }
+        return {
+          selectedId: path[path.length - 1].id,
+          path: path,
+        };
+      });
     });
   };
 
