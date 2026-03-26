@@ -497,8 +497,6 @@
 
   function HierarchyApi(api) {
     this.api = api || null;
-    this.defaultIfcIndex = null;
-    this.defaultIfcIndexPromise = null;
     this.uploadedIfcIndexes = [];
     this.mergedIfcIndex = null;
     this.mergedIfcIndexPromise = null;
@@ -520,59 +518,22 @@
   };
 
   HierarchyApi.prototype.getIfcIndexSummary = function () {
-    var count = 0;
     var names = [];
-    var defaultName = this.defaultIfcIndex && this.defaultIfcIndex.sourceFile;
-    var uploadedCount = 0;
-    if (defaultName) {
-      count += 1;
-      names.push(defaultName);
-    }
     this.uploadedIfcIndexes.forEach(function (index) {
       if (index && index.sourceFile) {
-        count += 1;
-        uploadedCount += 1;
         names.push(index.sourceFile);
       }
     });
     return {
-      sourceCount: count,
+      sourceCount: names.length,
       sourceFiles: names,
-      uploadedCount: uploadedCount,
-      defaultLoaded: !!defaultName,
+      uploadedCount: names.length,
     };
   };
 
   HierarchyApi.prototype.invalidateIfcIndex = function () {
     this.mergedIfcIndex = null;
     this.mergedIfcIndexPromise = null;
-  };
-
-  HierarchyApi.prototype.loadDefaultIfcIndex = function () {
-    var self = this;
-    if (this.defaultIfcIndex !== null) return Promise.resolve(this.defaultIfcIndex);
-    if (this.defaultIfcIndexPromise) return this.defaultIfcIndexPromise;
-    if (typeof global.fetch !== "function") {
-      this.defaultIfcIndex = null;
-      return Promise.resolve(null);
-    }
-
-    this.defaultIfcIndexPromise = global
-      .fetch("./hierarchy-index.json", { cache: "no-store" })
-      .then(function (response) {
-        if (!response || !response.ok) return null;
-        return response.json();
-      })
-      .then(function (index) {
-        self.defaultIfcIndex = index && index.nodes ? index : null;
-        return self.defaultIfcIndex;
-      })
-      .catch(function () {
-        self.defaultIfcIndex = null;
-        return null;
-      });
-
-    return this.defaultIfcIndexPromise;
   };
 
   HierarchyApi.prototype.loadIfcFiles = function (files) {
@@ -619,17 +580,8 @@
     if (this.mergedIfcIndex) return Promise.resolve(this.mergedIfcIndex);
     if (this.mergedIfcIndexPromise) return this.mergedIfcIndexPromise;
 
-    this.mergedIfcIndexPromise = this.loadDefaultIfcIndex().then(function (defaultIndex) {
-      var uploadedNames = {};
-      var indexes = [];
-      self.uploadedIfcIndexes.forEach(function (index) {
-        if (index && index.sourceFile) uploadedNames[index.sourceFile] = true;
-      });
-      if (defaultIndex && (!defaultIndex.sourceFile || !uploadedNames[defaultIndex.sourceFile])) {
-        indexes.push(defaultIndex);
-      }
-      indexes = indexes.concat(self.uploadedIfcIndexes);
-      self.mergedIfcIndex = mergeIfcIndexes(indexes);
+    this.mergedIfcIndexPromise = Promise.resolve().then(function () {
+      self.mergedIfcIndex = mergeIfcIndexes(self.uploadedIfcIndexes);
       return self.mergedIfcIndex;
     });
 
@@ -708,30 +660,18 @@
   };
 
   HierarchyApi.prototype.fetchRoot = function () {
-    var api = this.api;
     var self = this;
     return this.loadIfcIndex().then(function (index) {
       if (index && index.rootId && index.nodes && index.nodes[index.rootId]) {
         return self.mapIndexedNode(index.nodes[index.rootId]);
       }
-      if (!api || typeof api.getProjectId !== "function") {
-        return {
-          id: "project-unknown",
-          type: "project",
-          name: "Project",
-          hasChildren: true,
-          meta: { source: "fallback-root" },
-        };
-      }
-      return api.getProjectId().then(function (projectId) {
-        return {
-          id: String(projectId || "project-unknown"),
-          type: "project",
-          name: "Project " + String(projectId || "unknown"),
-          hasChildren: true,
-          meta: { source: "getProjectId" },
-        };
-      });
+      return {
+        id: "note::upload-required",
+        type: "note",
+        name: "Load one or more IFC files to build the hierarchy",
+        hasChildren: false,
+        meta: { source: "upload-required" },
+      };
     });
   };
 
@@ -1004,61 +944,40 @@
     var self = this;
     var pickedIdentifiers = this.extractPickedObjectCandidates(picked);
     var ifcSummary = this.getIfcIndexSummary();
-    var hasIfcSources = !!(ifcSummary && ifcSummary.sourceCount);
     return this.resolvePathFromIfcIndex(pickedIdentifiers).then(function (indexedResult) {
-      var directPath;
       if (indexedResult && indexedResult.path && indexedResult.path.length) {
         indexedResult.pathSource = "ifc-index";
         return indexedResult;
       }
 
-      if (hasIfcSources) {
-        return self.bestEffortGetObjectInfo(picked).then(function (result) {
-          var selectedId = firstString(result && result.selectedId, pickedIdentifiers[0]);
+      return self.bestEffortGetObjectInfo(picked).then(function (result) {
+        var detailSources = [
+          result && result.detail,
+          result && result.detail && result.detail.raw,
+          result && result.detail && result.detail.attributes,
+        ];
+        var detailIdentifiers = uniqueStrings(
+          pickedIdentifiers.concat([
+            pickFromSources(detailSources, ["guid", "globalId", "ifcGuid", "GlobalId"]),
+            pickFromSources(detailSources, ["id", "objectId", "dbId", "expressId"]),
+            pickFromSources(detailSources, ["objectGuid", "object-guid", "ifcObjectGuid"]),
+          ])
+        );
+
+        return self.resolvePathFromIfcIndex(detailIdentifiers).then(function (detailIndexedResult) {
+          if (detailIndexedResult && detailIndexedResult.path && detailIndexedResult.path.length) {
+            detailIndexedResult.pathSource = "ifc-index";
+            return detailIndexedResult;
+          }
           return {
-            selectedId: selectedId,
+            selectedId: firstString(result && result.selectedId, detailIdentifiers[0]),
             path: [],
             pathSource: "missing-from-ifc",
-            message: selectedId
-              ? "Selected object is not present in the loaded IFC hierarchy"
-              : "Selected object could not be matched to the loaded IFC files",
+            message: ifcSummary && ifcSummary.sourceCount
+              ? "Selected object is not present in the loaded IFC files"
+              : "Load one or more IFC files before selecting objects",
           };
         });
-      }
-
-      directPath = self.derivePathFromObject({}, pickedIdentifiers, picked);
-      if (self.pathHasHierarchyContext(directPath)) {
-        return {
-          selectedId: directPath[directPath.length - 1].id,
-          path: directPath,
-          pathSource: "selected-object",
-        };
-      }
-
-      return self.bestEffortGetObjectInfo(picked).then(function (result) {
-        var detail = result.detail || {};
-        var identifiers = result.identifiers || [];
-        var path = self.derivePathFromObject(detail, identifiers, picked);
-        if (!path.length) {
-          return {
-            selectedId: firstString(result.selectedId, identifiers[0]),
-            path: [
-              {
-                id: "selection::missing",
-                type: "note",
-                name: "Clicked object could not be resolved to hierarchy",
-                hasChildren: false,
-                meta: { source: "selection-fallback" },
-              },
-            ],
-            pathSource: "selection-fallback",
-          };
-        }
-        return {
-          selectedId: path[path.length - 1].id,
-          path: path,
-          pathSource: "selected-object",
-        };
       });
     });
   };

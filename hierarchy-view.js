@@ -152,12 +152,8 @@
 
   function formatIfcSummary(summary) {
     var count = summary && summary.sourceCount ? summary.sourceCount : 0;
-    var uploaded = summary && summary.uploadedCount ? summary.uploadedCount : 0;
-    var defaultLoaded = !!(summary && summary.defaultLoaded);
-    if (!count) return "No IFC";
-    if (defaultLoaded && uploaded) return count + " IFC (1 bundled + " + uploaded + " uploaded)";
-    if (uploaded) return uploaded + " uploaded IFC" + (uploaded === 1 ? "" : "s");
-    return count + " bundled IFC";
+    if (!count) return "No IFC loaded";
+    return count === 1 ? "1 IFC loaded" : count + " IFC loaded";
   }
 
   function HierarchyView(rootEl, store, api) {

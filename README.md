@@ -1,44 +1,31 @@
 ﻿# IFC Hierarchy Widget
 
-Standalone StreamBIM widget for exploring IFC hierarchy with lazy loading and picked-object focus.
+Standalone StreamBIM widget for exploring IFC hierarchy from IFC files that are loaded directly into the widget.
 
 ## What it does
 
-- Renders true IFC tree data when `hierarchy-index.json` is present
-- Falls back to StreamBIM widget/API probing when no IFC index is available
-- Focuses the clicked StreamBIM object in the tree
-- Uses the IFC file hierarchy for GUID lookup instead of guessing from payload fields when an index exists
+- Builds the model tree only from IFC files that the user uploads in the widget
+- Supports loading one or more IFC files and merging them into one tree view
+- Focuses the clicked StreamBIM object in the tree when the object exists in the loaded IFC files
+- Keeps the tree clean if a clicked StreamBIM object is not found in the loaded IFC files
 - Click on an element in the tree attempts `highlightObject(...)` and `gotoObject(...)`
 
 ## Files
 
 - `index.html`: Widget shell and inline styling
-- `hierarchy-api.js`: StreamBIM adapter, IFC index loading, and endpoint probing
+- `hierarchy-api.js`: IFC parsing, GUID lookup, and StreamBIM adapter logic
 - `hierarchy-store.js`: Tree state and lazy child loading
 - `hierarchy-view.js`: Renderer and UI bindings
-- `hierarchy-index.json`: Prebuilt IFC hierarchy index used by the widget when present
-- `scripts/build-ifc-index.js`: Builds `hierarchy-index.json` from an IFC file
+- `scripts/build-ifc-index.js`: Optional utility for building a hierarchy index from an IFC file
 - `streambim-widget-api.min.js`: Local widget API bundle
 
-## Current IFC index
+## Usage
 
-The repo currently includes an index built from:
-- `SE-TRV_ROAD_4x3.ifc`
-
-Example verified GUID path from that file:
-- `3oF2ohaM90mumLPvHsPPyl`
-- `IfcProject > IfcSite > IfcGeomodel > IfcGeotechnicalStratum`
-
-## Rebuild the IFC index
-
-```bash
-node scripts/build-ifc-index.js /path/to/file.ifc ./hierarchy-index.json
-```
-
-## Deploy
-
-GitHub Pages deploy is handled by `.github/workflows/deploy-pages.yml` and includes `hierarchy-index.json` in the published site.
+1. Open the widget in StreamBIM
+2. Click `Load IFC files`
+3. Select one or more IFC files
+4. Explore the merged hierarchy in the model tree
 
 ## Important limitation
 
-The widget can only use the exact IFC hierarchy for the files that have been indexed into `hierarchy-index.json`. If the selected object belongs to another IFC source that is not in the index, the widget falls back to StreamBIM-exposed hierarchy data when available.
+The widget only knows the exact IFC hierarchy for the IFC files that are currently loaded into it. If a clicked StreamBIM object belongs to another source, the widget will not inject a synthetic fallback hierarchy into the tree.

@@ -154,7 +154,7 @@
   HierarchyStore.prototype.clearIfcFiles = function () {
     var self = this;
     this.error = "";
-    this.statusMessage = "Clearing uploaded IFC files...";
+    this.statusMessage = "Clearing IFC files...";
     this.emit();
     return this.apiAdapter
       .clearUploadedIfcFiles()
@@ -163,12 +163,12 @@
         return self.reloadTree("Loading IFC hierarchy...").then(function () {
           self.statusMessage = summary && summary.sourceCount
             ? "Loaded " + formatIfcSummary(summary)
-            : "Cleared uploaded IFC files";
+            : "Cleared IFC files";
           self.emit();
         });
       })
       .catch(function (err) {
-        self.error = err && err.message ? err.message : "Failed to clear uploaded IFC files";
+        self.error = err && err.message ? err.message : "Failed to clear IFC files";
         self.statusMessage = self.error;
         self.emit();
       });
