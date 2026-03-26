@@ -1,4 +1,4 @@
-﻿(function (global) {
+(function (global) {
   "use strict";
 
   function el(tag, className, text) {
@@ -156,6 +156,95 @@
     return count === 1 ? "1 IFC loaded" : count + " IFC loaded";
   }
 
+  function renderProperties(view, state) {
+    var container = view.propertiesEl;
+    var selectedNode = state.selectedId && state.nodesById[state.selectedId];
+    var titleRow;
+    var heading;
+    var subtitle;
+    var info;
+
+    container.innerHTML = "";
+
+    titleRow = el("div", "properties-top");
+    heading = el("div", "properties-heading-wrap");
+    heading.appendChild(el("div", "properties-label", "Properties"));
+    heading.appendChild(
+      el(
+        "div",
+        "properties-title",
+        state.propertiesTitle || (selectedNode && selectedNode.name) || "No object selected"
+      )
+    );
+    titleRow.appendChild(heading);
+
+    subtitle = el(
+      "div",
+      "properties-subtitle",
+      selectedNode ? detailForNode(selectedNode) || "IFC object" : "Select an IFC object in StreamBIM or in the tree"
+    );
+    titleRow.appendChild(subtitle);
+    container.appendChild(titleRow);
+
+    if (!state.selectedId) {
+      container.appendChild(
+        el("div", "properties-empty", "Select an IFC object in StreamBIM to inspect its property sets and values.")
+      );
+      return;
+    }
+
+    if (state.propertiesLoading) {
+      container.appendChild(el("div", "properties-empty", "Loading properties..."));
+      return;
+    }
+
+    if (state.propertiesError) {
+      info = el("div", "properties-empty properties-error", state.propertiesError);
+      container.appendChild(info);
+      return;
+    }
+
+    if (state.propertiesMessage && !state.propertyGroups.length) {
+      container.appendChild(el("div", "properties-empty", state.propertiesMessage));
+      return;
+    }
+
+    state.propertyGroups.forEach(function (group, index) {
+      var groupId = String(group.id || "group-" + index);
+      var isCollapsed = !!view.collapsedPropertyGroups[groupId];
+      var card = el("section", "property-group");
+      var header = el("button", "property-group-header");
+      var title = el("div", "property-group-title", group.name || "Property Set");
+      var meta = el("div", "property-group-meta", (group.items || []).length + " values");
+      var body = el("div", "property-group-body");
+      var caret = el("span", "property-group-caret", isCollapsed ? "+" : "-");
+
+      header.appendChild(title);
+      header.appendChild(meta);
+      header.appendChild(caret);
+      header.onclick = function () {
+        view.collapsedPropertyGroups[groupId] = !view.collapsedPropertyGroups[groupId];
+        view.render(view.lastState);
+      };
+      card.appendChild(header);
+
+      if (!isCollapsed) {
+        (group.items || []).forEach(function (item) {
+          var row = el("div", "property-row");
+          row.appendChild(el("div", "property-name", item.name || "Unnamed"));
+          row.appendChild(el("div", "property-value", item.value || "-"));
+          body.appendChild(row);
+        });
+        if (!(group.items || []).length) {
+          body.appendChild(el("div", "properties-empty", "No values in this group."));
+        }
+        card.appendChild(body);
+      }
+
+      container.appendChild(card);
+    });
+  }
+
   function HierarchyView(rootEl, store, api) {
     this.rootEl = rootEl;
     this.store = store;
@@ -164,12 +253,16 @@
     this.metaEl = document.getElementById("meta");
     this.ifcSummaryEl = document.getElementById("ifc-summary");
     this.treeEl = document.getElementById("tree");
+    this.propertiesEl = document.getElementById("properties");
     this.collapseBtn = document.getElementById("collapse-all");
     this.expand2Btn = document.getElementById("expand-2");
     this.expand4Btn = document.getElementById("expand-4");
     this.loadBtn = document.getElementById("load-ifc");
     this.clearBtn = document.getElementById("clear-ifc");
     this.fileInput = document.getElementById("ifc-files");
+    this.collapsedPropertyGroups = {};
+    this.lastPropertyTargetId = "";
+    this.lastState = null;
     this.bind();
   }
 
@@ -217,6 +310,12 @@
     var tooltipLines = [];
     var content;
 
+    this.lastState = state;
+    if (state.propertiesTargetId !== this.lastPropertyTargetId) {
+      this.collapsedPropertyGroups = {};
+      this.lastPropertyTargetId = state.propertiesTargetId;
+    }
+
     this.treeEl.innerHTML = "";
     this.statusEl.textContent = state.statusMessage || "Ready";
     this.statusEl.className = state.error ? "footer-status err" : "footer-status ok";
@@ -235,12 +334,15 @@
       this.clearBtn.disabled = !(ifcSummary.uploadedCount > 0);
     }
 
-    if (!state.rootId) return;
-    content = renderTreeContent(state, {
-      onToggle: this.store.toggle.bind(this.store),
-      onSelect: this.onSelectNode.bind(this),
-    });
-    if (content) this.treeEl.appendChild(content);
+    if (state.rootId) {
+      content = renderTreeContent(state, {
+        onToggle: this.store.toggle.bind(this.store),
+        onSelect: this.onSelectNode.bind(this),
+      });
+      if (content) this.treeEl.appendChild(content);
+    }
+
+    renderProperties(this, state);
 
     if (state.selectedId) {
       setTimeout(function () {

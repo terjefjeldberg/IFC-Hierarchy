@@ -173,7 +173,7 @@
     var eq;
     var depth;
     var inString;
-    var end;
+    var endIndex;
     var j;
     var ch;
     while (i < slice.length) {
@@ -183,7 +183,7 @@
       if (eq < 0) break;
       depth = 0;
       inString = false;
-      end = -1;
+      endIndex = -1;
       for (j = eq + 1; j < slice.length; j += 1) {
         ch = slice.charAt(j);
         if (inString) {
@@ -207,15 +207,144 @@
           continue;
         }
         if (ch === ";" && depth === 0) {
-          end = j;
+          endIndex = j;
           break;
         }
       }
-      if (end < 0) break;
-      records.push(slice.slice(hash, end + 1).trim());
-      i = end + 1;
+      if (endIndex < 0) break;
+      records.push(slice.slice(hash, endIndex + 1).trim());
+      i = endIndex + 1;
     }
     return records;
+  }
+
+  function extractStepRefs(input) {
+    return String(input || "").match(/#\d+/g) || [];
+  }
+
+  function normalizeIfcScalar(token) {
+    var trimmed = String(token || "").trim();
+    if (!trimmed) return "";
+    if (/^[+-]?\d+(?:\.\d+)?(?:E[+-]?\d+)?$/i.test(trimmed)) {
+      return trimmed.replace(/(\.\d*?)0+$/g, "$1").replace(/\.$/, "");
+    }
+    return trimmed;
+  }
+
+  function parseIfcValueToken(token) {
+    var trimmed = String(token == null ? "" : token).trim();
+    var match;
+    var values;
+    if (!trimmed || trimmed === "$" || trimmed === "*") return "";
+    if (trimmed.charAt(0) === "'" && trimmed.charAt(trimmed.length - 1) === "'") {
+      return decodeIfcStringToken(trimmed);
+    }
+    if (/^\.(T|F|U)\.$/i.test(trimmed)) {
+      if (/^\.T\.$/i.test(trimmed)) return "true";
+      if (/^\.F\.$/i.test(trimmed)) return "false";
+      return "unknown";
+    }
+    if (trimmed.charAt(0) === "(" && trimmed.charAt(trimmed.length - 1) === ")") {
+      values = splitTopLevel(trimmed.slice(1, -1))
+        .map(parseIfcValueToken)
+        .filter(Boolean);
+      return values.join(", ");
+    }
+    match = trimmed.match(/^([A-Z0-9_]+)\(([\s\S]*)\)$/i);
+    if (match) {
+      values = splitTopLevel(match[2])
+        .map(parseIfcValueToken)
+        .filter(Boolean);
+      if (!values.length) return "";
+      return values.length === 1 ? values[0] : values.join(", ");
+    }
+    return normalizeIfcScalar(trimmed);
+  }
+
+  function createPropertyEntry(name, value, valueType) {
+    return {
+      name: firstString(name, "Unnamed"),
+      value: value == null || String(value).trim() === "" ? "-" : String(value).trim(),
+      valueType: valueType || "",
+    };
+  }
+
+  function buildPropertyItem(entityName, args) {
+    var name = decodeIfcStringToken(args[0]) || normalizeIfcClass(entityName);
+    var value = "";
+    var upper = String(entityName || "").toUpperCase();
+    if (entityName === "IFCPROPERTYSINGLEVALUE") {
+      return createPropertyEntry(name, parseIfcValueToken(args[2]), "single");
+    }
+    if (entityName === "IFCPROPERTYENUMERATEDVALUE") {
+      return createPropertyEntry(name, parseIfcValueToken(args[2]), "enumeration");
+    }
+    if (entityName === "IFCPROPERTYLISTVALUE") {
+      return createPropertyEntry(name, parseIfcValueToken(args[2]), "list");
+    }
+    if (entityName === "IFCPROPERTYBOUNDEDVALUE") {
+      value = [
+        parseIfcValueToken(args[3]) ? "min " + parseIfcValueToken(args[3]) : "",
+        parseIfcValueToken(args[2]) ? "max " + parseIfcValueToken(args[2]) : "",
+        parseIfcValueToken(args[4]) ? "set " + parseIfcValueToken(args[4]) : "",
+      ]
+        .filter(Boolean)
+        .join(" / ");
+      return createPropertyEntry(name, value, "bounded");
+    }
+    if (entityName === "IFCPROPERTYREFERENCEVALUE") {
+      value = firstString(
+        parseIfcValueToken(args[3]),
+        parseIfcValueToken(args[2]),
+        parseIfcValueToken(args[4])
+      );
+      return createPropertyEntry(name, value, "reference");
+    }
+    if (entityName === "IFCPROPERTYTABLEVALUE") {
+      value = firstString(parseIfcValueToken(args[2]), parseIfcValueToken(args[3]));
+      return createPropertyEntry(name, value, "table");
+    }
+    if (upper.indexOf("IFCQUANTITY") === 0) {
+      return createPropertyEntry(name, parseIfcValueToken(args[3]), "quantity");
+    }
+    return null;
+  }
+
+  function flattenPropertyRefs(refs, propertyItemsByStep, prefix, trail, output) {
+    asArray(refs).forEach(function (ref) {
+      var key = String(prefix || "") + "::" + String(ref || "");
+      var propertyItem;
+      var childPrefix;
+      if (!ref || trail[key]) return;
+      trail[key] = true;
+      propertyItem = propertyItemsByStep[String(ref)];
+      if (!propertyItem) return;
+      if (propertyItem.kind === "group") {
+        childPrefix = firstString(prefix, "")
+          ? prefix + " / " + propertyItem.name
+          : propertyItem.name;
+        flattenPropertyRefs(propertyItem.refs, propertyItemsByStep, childPrefix, trail, output);
+        return;
+      }
+      output.push({
+        name: firstString(prefix, "")
+          ? prefix + " / " + propertyItem.name
+          : propertyItem.name,
+        value: propertyItem.value,
+        valueType: propertyItem.valueType,
+      });
+    });
+  }
+
+  function clonePropertyGroup(group) {
+    return {
+      id: group && group.id ? String(group.id) : "",
+      name: firstString(group && group.name, "Property Set"),
+      groupType: firstString(group && group.groupType, "property-set"),
+      items: asArray(group && group.items).map(function (item) {
+        return createPropertyEntry(item && item.name, item && item.value, item && item.valueType);
+      }),
+    };
   }
 
   function normalizeIfcClass(entityName) {
@@ -252,6 +381,9 @@
     var entities = {};
     var parentByStep = {};
     var childrenByStep = {};
+    var propertyGroupStepsByObjectStep = {};
+    var propertyItemsByStep = {};
+    var propertyDefinitionsByStep = {};
 
     asArray(records).forEach(function (record) {
       var match = String(record || "").match(/^#(\d+)\s*=\s*([A-Z0-9_]+)\((.*)\);$/i);
@@ -263,9 +395,10 @@
       var ifcClass;
       var parentRef;
       var childRefs;
+      var definitionRef;
       if (!match) return;
       stepId = "#" + match[1];
-      entityName = String(match[2]).trim();
+      entityName = String(match[2]).trim().toUpperCase();
       args = splitTopLevel(match[3]);
       guid = decodeIfcStringToken(args[0]);
       name = decodeIfcStringToken(args[2]);
@@ -282,36 +415,122 @@
 
       if (entityName === "IFCRELAGGREGATES") {
         parentRef = String(args[4] || "").trim();
-        childRefs = String(args[5] || "").match(/#\d+/g) || [];
+        childRefs = extractStepRefs(args[5]);
         childRefs.forEach(function (childRef) {
           parentByStep[childRef] = parentRef;
           childrenByStep[parentRef] = childrenByStep[parentRef] || [];
-          childrenByStep[parentRef].push(childRef);
+          if (childrenByStep[parentRef].indexOf(childRef) === -1) {
+            childrenByStep[parentRef].push(childRef);
+          }
         });
       }
 
       if (entityName === "IFCRELCONTAINEDINSPATIALSTRUCTURE") {
-        childRefs = String(args[4] || "").match(/#\d+/g) || [];
+        childRefs = extractStepRefs(args[4]);
         parentRef = String(args[5] || "").trim();
         childRefs.forEach(function (childRef) {
           if (!parentByStep[childRef]) parentByStep[childRef] = parentRef;
           childrenByStep[parentRef] = childrenByStep[parentRef] || [];
-          childrenByStep[parentRef].push(childRef);
+          if (childrenByStep[parentRef].indexOf(childRef) === -1) {
+            childrenByStep[parentRef].push(childRef);
+          }
         });
       }
+
+      if (entityName === "IFCRELDEFINESBYPROPERTIES") {
+        childRefs = extractStepRefs(args[4]);
+        definitionRef = String(args[5] || "").trim();
+        childRefs.forEach(function (childRef) {
+          propertyGroupStepsByObjectStep[childRef] = propertyGroupStepsByObjectStep[childRef] || [];
+          if (definitionRef && propertyGroupStepsByObjectStep[childRef].indexOf(definitionRef) === -1) {
+            propertyGroupStepsByObjectStep[childRef].push(definitionRef);
+          }
+        });
+      }
+    });
+
+    Object.keys(entities).forEach(function (stepId) {
+      var entity = entities[stepId];
+      var args = entity.args || [];
+      var propertyItem;
+      if (entity.entityName === "IFCPROPERTYCOMPLEXPROPERTY") {
+        propertyItemsByStep[stepId] = {
+          kind: "group",
+          name: firstString(decodeIfcStringToken(args[0]), "Complex Property"),
+          refs: extractStepRefs(args[3]),
+        };
+        return;
+      }
+      if (entity.entityName === "IFCPHYSICALCOMPLEXQUANTITY") {
+        propertyItemsByStep[stepId] = {
+          kind: "group",
+          name: firstString(decodeIfcStringToken(args[0]), "Complex Quantity"),
+          refs: extractStepRefs(args[2]),
+        };
+        return;
+      }
+      propertyItem = buildPropertyItem(entity.entityName, args);
+      if (propertyItem) {
+        propertyItemsByStep[stepId] = {
+          kind: "item",
+          name: propertyItem.name,
+          value: propertyItem.value,
+          valueType: propertyItem.valueType,
+        };
+      }
+    });
+
+    Object.keys(entities).forEach(function (stepId) {
+      var entity = entities[stepId];
+      var args = entity.args || [];
+      var refs = [];
+      var items = [];
+      var groupType = "";
+      if (entity.entityName === "IFCPROPERTYSET") {
+        refs = extractStepRefs(args[4]);
+        groupType = "property-set";
+      } else if (entity.entityName === "IFCELEMENTQUANTITY") {
+        refs = extractStepRefs(args[5]);
+        groupType = "quantity-set";
+      } else {
+        return;
+      }
+      flattenPropertyRefs(refs, propertyItemsByStep, "", {}, items);
+      propertyDefinitionsByStep[stepId] = {
+        id: stepId,
+        name: firstString(decodeIfcStringToken(args[2]), normalizeIfcClass(entity.entityName)),
+        groupType: groupType,
+        items: items,
+      };
     });
 
     return {
       entities: entities,
       parentByStep: parentByStep,
       childrenByStep: childrenByStep,
+      propertyDefinitionsByStep: propertyDefinitionsByStep,
+      propertyGroupStepsByObjectStep: propertyGroupStepsByObjectStep,
     };
+  }
+
+  function buildObjectPropertyGroups(stepId, propertyGroupStepsByObjectStep, propertyDefinitionsByStep) {
+    var groups = [];
+    var seen = {};
+    asArray(propertyGroupStepsByObjectStep && propertyGroupStepsByObjectStep[stepId]).forEach(function (groupStep) {
+      var definition = propertyDefinitionsByStep && propertyDefinitionsByStep[groupStep];
+      if (!definition || seen[groupStep]) return;
+      seen[groupStep] = true;
+      groups.push(clonePropertyGroup(definition));
+    });
+    return groups;
   }
 
   function buildIfcIndex(parsed, sourceFile) {
     var entities = parsed.entities || {};
     var parentByStep = parsed.parentByStep || {};
     var childrenByStep = parsed.childrenByStep || {};
+    var propertyDefinitionsByStep = parsed.propertyDefinitionsByStep || {};
+    var propertyGroupStepsByObjectStep = parsed.propertyGroupStepsByObjectStep || {};
     var nodes = {};
     var guidToNodeIds = {};
     var stepToNodeId = {};
@@ -332,6 +551,7 @@
         name: entity.name || entity.ifcClass || stepId,
         parentId: null,
         childrenIds: [],
+        propertyGroups: buildObjectPropertyGroups(stepId, propertyGroupStepsByObjectStep, propertyDefinitionsByStep),
         sourceFile: sourceFile,
       };
       if (entity.guid) {
@@ -394,7 +614,6 @@
   function buildIfcIndexFromText(text, sourceFile) {
     return buildIfcIndex(parseIfcRecords(extractIfcRecords(text)), sourceFile);
   }
-
   function mergeIfcIndexes(indexes) {
     var active = asArray(indexes).filter(function (index) {
       return index && index.nodes && index.rootId;
@@ -452,6 +671,7 @@
               return remap[childId];
             })
             .filter(Boolean),
+          propertyGroups: asArray(sourceNode.propertyGroups).map(clonePropertyGroup),
           sourceFile: sourceName,
         };
       });
@@ -655,6 +875,41 @@
       return {
         selectedId: nodeId,
         path: self.buildPathFromIndexedNode(index, nodeId),
+      };
+    });
+  };
+
+  HierarchyApi.prototype.fetchNodeProperties = function (nodeId) {
+    var self = this;
+    return this.loadIfcIndex().then(function (index) {
+      var indexedNode = index && index.nodes && index.nodes[String(nodeId)];
+      var groups = [];
+      if (!indexedNode) {
+        return {
+          node: null,
+          groups: [],
+          message: "Selected object is not present in the loaded IFC files",
+        };
+      }
+      groups.push({
+        id: "object::" + String(indexedNode.id),
+        name: "Object",
+        groupType: "identity",
+        items: [
+          createPropertyEntry("Name", indexedNode.name || "", "identity"),
+          createPropertyEntry("IFC class", indexedNode.ifcClass || indexedNode.type || "", "identity"),
+          createPropertyEntry("GlobalId", indexedNode.guid || "", "identity"),
+          createPropertyEntry("STEP id", indexedNode.stepId || "", "identity"),
+          createPropertyEntry("Source file", indexedNode.sourceFile || "", "identity"),
+        ],
+      });
+      asArray(indexedNode.propertyGroups).forEach(function (group) {
+        groups.push(clonePropertyGroup(group));
+      });
+      return {
+        node: self.mapIndexedNode(indexedNode),
+        groups: groups,
+        message: groups.length > 1 ? "" : "No IFC property sets found for this object",
       };
     });
   };

@@ -1,4 +1,4 @@
-﻿(function (global) {
+(function (global) {
   "use strict";
 
   function formatIfcSummary(summary) {
@@ -18,6 +18,13 @@
     this.selectedPath = [];
     this.focusedPathIds = [];
     this.capabilities = apiAdapter.probeCapabilities();
+    this.propertyGroups = [];
+    this.propertiesLoading = false;
+    this.propertiesError = "";
+    this.propertiesMessage = "Select an IFC object to view properties";
+    this.propertiesTitle = "";
+    this.propertiesTargetId = "";
+    this.propertiesRequestId = 0;
     this.onChange = function () {};
   }
 
@@ -37,7 +44,22 @@
       selectedPath: this.selectedPath,
       capabilities: this.capabilities,
       ifcSummary: this.apiAdapter.getIfcIndexSummary(),
+      propertyGroups: this.propertyGroups,
+      propertiesLoading: this.propertiesLoading,
+      propertiesError: this.propertiesError,
+      propertiesMessage: this.propertiesError || this.propertiesMessage,
+      propertiesTitle: this.propertiesTitle,
+      propertiesTargetId: this.propertiesTargetId,
     };
+  };
+
+  HierarchyStore.prototype.clearProperties = function (message) {
+    this.propertyGroups = [];
+    this.propertiesLoading = false;
+    this.propertiesError = "";
+    this.propertiesTitle = "";
+    this.propertiesTargetId = "";
+    this.propertiesMessage = message || "Select an IFC object to view properties";
   };
 
   HierarchyStore.prototype.resetTreeState = function () {
@@ -49,6 +71,7 @@
     this.selectedId = "";
     this.selectedPath = [];
     this.focusedPathIds = [];
+    this.clearProperties();
   };
 
   HierarchyStore.prototype.upsertNode = function (node, parentId) {
@@ -91,12 +114,59 @@
     this.selectedPath = path;
   };
 
+  HierarchyStore.prototype.loadSelectedProperties = function (nodeId) {
+    var self = this;
+    var requestId;
+    var selectedNode;
+    if (!nodeId || !this.nodesById[nodeId]) {
+      this.clearProperties();
+      this.emit();
+      return Promise.resolve();
+    }
+
+    selectedNode = this.nodesById[nodeId];
+    requestId = ++this.propertiesRequestId;
+    this.propertiesLoading = true;
+    this.propertiesError = "";
+    this.propertiesTargetId = String(nodeId);
+    this.propertiesTitle = selectedNode.name || String(nodeId);
+    this.propertiesMessage = "Loading properties...";
+    this.emit();
+
+    return this.apiAdapter
+      .fetchNodeProperties(nodeId)
+      .then(function (result) {
+        if (requestId !== self.propertiesRequestId) return;
+        self.propertyGroups = (result && result.groups) || [];
+        self.propertiesLoading = false;
+        self.propertiesError = "";
+        self.propertiesTitle =
+          (result && result.node && result.node.name) ||
+          (self.nodesById[nodeId] && self.nodesById[nodeId].name) ||
+          String(nodeId);
+        self.propertiesTargetId = String(nodeId);
+        self.propertiesMessage =
+          (result && result.message) ||
+          (self.propertyGroups.length ? "" : "No IFC properties found for this object");
+        self.emit();
+      })
+      .catch(function (err) {
+        if (requestId !== self.propertiesRequestId) return;
+        self.propertyGroups = [];
+        self.propertiesLoading = false;
+        self.propertiesError = err && err.message ? err.message : "Failed to load object properties";
+        self.propertiesMessage = self.propertiesError;
+        self.emit();
+      });
+  };
+
   HierarchyStore.prototype.selectNode = function (nodeId) {
-    if (!this.nodesById[nodeId]) return;
+    if (!this.nodesById[nodeId]) return Promise.resolve();
     this.selectedId = String(nodeId);
     this.rebuildSelectedPath();
     this.statusMessage = "Selected: " + (this.nodesById[nodeId].name || nodeId);
     this.emit();
+    return this.loadSelectedProperties(nodeId);
   };
 
   HierarchyStore.prototype.reloadTree = function (initialStatus) {
@@ -284,6 +354,9 @@
         if (!parentId) return;
 
         if (!path.length) {
+          self.selectedId = "";
+          self.selectedPath = [];
+          self.clearProperties((result && result.message) || "Selected object is not present in the loaded IFC hierarchy");
           self.statusMessage = (result && result.message) || "Selected object is not present in the loaded IFC hierarchy";
           self.emit();
           return;
@@ -308,6 +381,7 @@
           ? "Selected: " + ((self.nodesById[self.selectedId] && self.nodesById[self.selectedId].name) || self.selectedId)
           : "Object resolved";
         self.emit();
+        return self.loadSelectedProperties(self.selectedId);
       })
       .catch(function (err) {
         self.error = err && err.message ? err.message : "Failed to resolve selected object";
@@ -318,4 +392,3 @@
 
   global.HierarchyStore = HierarchyStore;
 })(window);
-
