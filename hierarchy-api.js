@@ -1242,6 +1242,40 @@
     });
   };
 
+  HierarchyApi.prototype.highlightPickedObject = function (picked) {
+    var api = this.api || {};
+    var self = this;
+    var identifiers = this.extractPickedObjectCandidates(picked);
+    var guid = firstString(identifiers[0]);
+
+    if (typeof api.highlightObject !== "function") {
+      return Promise.resolve("");
+    }
+
+    function applyHighlight(targetGuid) {
+      if (!targetGuid) return Promise.resolve("");
+      return Promise.resolve(
+        typeof api.deHighlightAllObjects === "function" ? api.deHighlightAllObjects().catch(function () {}) : null
+      ).then(function () {
+        return api.highlightObject(targetGuid).then(function () {
+          return targetGuid;
+        });
+      });
+    }
+
+    if (guid) {
+      return applyHighlight(guid).catch(function () {
+        return "";
+      });
+    }
+
+    return this.bestEffortGetObjectInfo(picked).then(function (result) {
+      return applyHighlight(firstString(result && result.selectedId, result && result.identifiers && result.identifiers[0]));
+    }).catch(function () {
+      return "";
+    });
+  };
+
   HierarchyApi.prototype.pathHasHierarchyContext = function (path) {
     return asArray(path).some(function (node) {
       return node && (node.type === "site" || node.type === "building" || node.type === "storey");

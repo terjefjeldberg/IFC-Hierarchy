@@ -350,6 +350,7 @@
     this.error = "";
     this.statusMessage = "Resolving selected object...";
     this.emit();
+    Promise.resolve(this.apiAdapter.highlightPickedObject(picked)).catch(function () {});
     return this.apiAdapter
       .resolvePickedObjectPath(picked)
       .then(function (result) {
