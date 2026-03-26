@@ -62,6 +62,12 @@
     this.propertiesMessage = message || "Select an IFC object to view properties";
   };
 
+  HierarchyStore.prototype.setStatusMessage = function (message, isError) {
+    this.error = isError ? String(message || "") : "";
+    this.statusMessage = String(message || "Ready");
+    this.emit();
+  };
+
   HierarchyStore.prototype.resetTreeState = function () {
     this.nodesById = {};
     this.rootId = null;

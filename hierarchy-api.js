@@ -261,11 +261,14 @@
     return normalizeIfcScalar(trimmed);
   }
 
-  function createPropertyEntry(name, value, valueType) {
+  function createPropertyEntry(name, value, valueType, options) {
+    var opts = options || {};
     return {
       name: firstString(name, "Unnamed"),
       value: value == null || String(value).trim() === "" ? "-" : String(value).trim(),
       valueType: valueType || "",
+      filterName: firstString(opts.filterName, name, "Unnamed"),
+      filterable: opts.filterable !== false,
     };
   }
 
@@ -326,13 +329,16 @@
         flattenPropertyRefs(propertyItem.refs, propertyItemsByStep, childPrefix, trail, output);
         return;
       }
-      output.push({
-        name: firstString(prefix, "")
-          ? prefix + " / " + propertyItem.name
-          : propertyItem.name,
-        value: propertyItem.value,
-        valueType: propertyItem.valueType,
-      });
+      output.push(
+        createPropertyEntry(
+          firstString(prefix, "")
+            ? prefix + " / " + propertyItem.name
+            : propertyItem.name,
+          propertyItem.value,
+          propertyItem.valueType,
+          { filterName: propertyItem.name, filterable: true }
+        )
+      );
     });
   }
 
@@ -342,7 +348,10 @@
       name: firstString(group && group.name, "Property Set"),
       groupType: firstString(group && group.groupType, "property-set"),
       items: asArray(group && group.items).map(function (item) {
-        return createPropertyEntry(item && item.name, item && item.value, item && item.valueType);
+        return createPropertyEntry(item && item.name, item && item.value, item && item.valueType, {
+          filterName: item && item.filterName,
+          filterable: item && item.filterable !== false,
+        });
       }),
     };
   }
@@ -896,11 +905,11 @@
         name: "Object",
         groupType: "identity",
         items: [
-          createPropertyEntry("Name", indexedNode.name || "", "identity"),
-          createPropertyEntry("IFC class", indexedNode.ifcClass || indexedNode.type || "", "identity"),
-          createPropertyEntry("GlobalId", indexedNode.guid || "", "identity"),
-          createPropertyEntry("STEP id", indexedNode.stepId || "", "identity"),
-          createPropertyEntry("Source file", indexedNode.sourceFile || "", "identity"),
+          createPropertyEntry("Name", indexedNode.name || "", "identity", { filterable: false }),
+          createPropertyEntry("IFC class", indexedNode.ifcClass || indexedNode.type || "", "identity", { filterable: false }),
+          createPropertyEntry("GlobalId", indexedNode.guid || "", "identity", { filterable: false }),
+          createPropertyEntry("STEP id", indexedNode.stepId || "", "identity", { filterable: false }),
+          createPropertyEntry("Source file", indexedNode.sourceFile || "", "identity", { filterable: false }),
         ],
       });
       asArray(indexedNode.propertyGroups).forEach(function (group) {
@@ -911,6 +920,50 @@
         groups: groups,
         message: groups.length > 1 ? "" : "No IFC property sets found for this object",
       };
+    });
+  };
+
+  HierarchyApi.prototype.applyPropertyFilter = function (nodeId, groupName, item) {
+    var api = this.api || {};
+    var propKey = firstString(item && item.filterName, item && item.name);
+    var propValue = item && item.value != null ? String(item.value).trim() : "";
+    var rule = {
+      psetName: firstString(groupName),
+      propKey: propKey,
+      propValue: propValue,
+      operator: "=",
+    };
+
+    if (typeof api.applyObjectSearch !== "function") {
+      return Promise.reject(new Error("StreamBIM widget API does not expose applyObjectSearch"));
+    }
+    if (!rule.psetName || !rule.propKey || !rule.propValue || rule.propValue === "-") {
+      return Promise.reject(new Error("Selected property is missing a searchable value"));
+    }
+
+    return Promise.resolve(
+      typeof api.getBuildingId === "function" ? api.getBuildingId().catch(function () { return ""; }) : ""
+    ).then(function (buildingId) {
+      var query;
+      if (buildingId) rule.buildingId = String(buildingId);
+      query = {
+        filter: { rules: [[rule]] },
+        page: { limit: 1000, skip: 0 },
+      };
+      return api
+        .applyObjectSearch(query, true)
+        .then(function () {
+          if (typeof api.setSearchVisualizationMode === "function") {
+            return api.setSearchVisualizationMode("FADED").catch(function () {});
+          }
+        })
+        .then(function () {
+          return {
+            groupName: rule.psetName,
+            propKey: rule.propKey,
+            propValue: rule.propValue,
+          };
+        });
     });
   };
 

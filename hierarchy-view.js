@@ -156,12 +156,29 @@
     return count === 1 ? "1 IFC loaded" : count + " IFC loaded";
   }
 
+  function appendPropertyCell(row, className, text, clickable, onClick) {
+    var cell;
+    if (clickable) {
+      cell = el("button", className + " property-cell-button", text || "-");
+      cell.type = "button";
+      cell.title = "Apply this property filter in StreamBIM";
+      cell.onclick = function (event) {
+        event.stopPropagation();
+        onClick();
+      };
+    } else {
+      cell = el("div", className, text || "-");
+    }
+    row.appendChild(cell);
+  }
+
   function renderProperties(view, state) {
     var container = view.propertiesEl;
     var selectedNode = state.selectedId && state.nodesById[state.selectedId];
     var titleRow;
     var heading;
     var subtitle;
+    var helper;
     var info;
 
     container.innerHTML = "";
@@ -176,12 +193,20 @@
         state.propertiesTitle || (selectedNode && selectedNode.name) || "No object selected"
       )
     );
+    helper = el(
+      "div",
+      "properties-helper",
+      selectedNode
+        ? "Click a property name or value to apply that filter in StreamBIM."
+        : "Select an IFC object in StreamBIM to inspect its property sets and values."
+    );
+    heading.appendChild(helper);
     titleRow.appendChild(heading);
 
     subtitle = el(
       "div",
       "properties-subtitle",
-      selectedNode ? detailForNode(selectedNode) || "IFC object" : "Select an IFC object in StreamBIM or in the tree"
+      selectedNode ? detailForNode(selectedNode) || "IFC object" : "No object selected"
     );
     titleRow.appendChild(subtitle);
     container.appendChild(titleRow);
@@ -231,8 +256,18 @@
       if (!isCollapsed) {
         (group.items || []).forEach(function (item) {
           var row = el("div", "property-row");
-          row.appendChild(el("div", "property-name", item.name || "Unnamed"));
-          row.appendChild(el("div", "property-value", item.value || "-"));
+          var canFilter =
+            group.groupType !== "identity" &&
+            item &&
+            item.filterable !== false &&
+            item.value &&
+            item.value !== "-";
+          appendPropertyCell(row, "property-name", item.name || "Unnamed", canFilter, function () {
+            view.applyPropertyFilter(state.selectedId, group, item);
+          });
+          appendPropertyCell(row, "property-value", item.value || "-", canFilter, function () {
+            view.applyPropertyFilter(state.selectedId, group, item);
+          });
           body.appendChild(row);
         });
         if (!(group.items || []).length) {
@@ -354,6 +389,25 @@
         }
       }, 0);
     }
+  };
+
+  HierarchyView.prototype.applyPropertyFilter = function (nodeId, group, item) {
+    var self = this;
+    this.store.setStatusMessage(
+      "Applying filter: " + String((group && group.name) || "Property Set") + " / " + String((item && item.filterName) || (item && item.name) || "Value") + " = " + String((item && item.value) || ""),
+      false
+    );
+    return this.store.apiAdapter
+      .applyPropertyFilter(nodeId, group && group.name, item)
+      .then(function (result) {
+        self.store.setStatusMessage(
+          "Filter applied: " + result.groupName + " / " + result.propKey + " = " + result.propValue,
+          false
+        );
+      })
+      .catch(function (err) {
+        self.store.setStatusMessage(err && err.message ? err.message : "Failed to apply StreamBIM filter", true);
+      });
   };
 
   HierarchyView.prototype.onSelectNode = function (node) {
