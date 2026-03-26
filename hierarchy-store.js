@@ -16,6 +16,7 @@
     this.statusMessage = "Initializing...";
     this.selectedId = "";
     this.selectedPath = [];
+    this.focusedPathIds = [];
     this.capabilities = apiAdapter.probeCapabilities();
     this.onChange = function () {};
   }
@@ -47,6 +48,7 @@
     this.error = "";
     this.selectedId = "";
     this.selectedPath = [];
+    this.focusedPathIds = [];
   };
 
   HierarchyStore.prototype.upsertNode = function (node, parentId) {
@@ -243,8 +245,28 @@
 
   HierarchyStore.prototype.collapseAll = function () {
     this.expanded = {};
+    this.focusedPathIds = [];
     if (this.rootId) this.expanded[this.rootId] = true;
     this.emit();
+  };
+
+  HierarchyStore.prototype.collapsePreviousFocusPath = function (nextPathIds) {
+    var previous = this.focusedPathIds || [];
+    var next = nextPathIds || [];
+    var common = 0;
+    var i;
+    var nodeId;
+    while (common < previous.length && common < next.length && previous[common] === next[common]) {
+      common += 1;
+    }
+    for (i = previous.length - 1; i >= common; i -= 1) {
+      nodeId = previous[i];
+      if (!nodeId || nodeId === this.rootId) continue;
+      if (this.nodesById[nodeId] && this.nodesById[nodeId].hasChildren) {
+        this.expanded[nodeId] = false;
+      }
+    }
+    this.focusedPathIds = next.slice();
   };
 
   HierarchyStore.prototype.focusPickedObject = function (picked) {
@@ -257,6 +279,7 @@
       .then(function (result) {
         var path = (result && result.path) || [];
         var parentId = self.rootId;
+        var nextFocusedPathIds;
         var i;
         if (!parentId) return;
 
@@ -265,6 +288,11 @@
           self.emit();
           return;
         }
+
+        nextFocusedPathIds = [String(parentId)].concat(path.map(function (node) {
+          return String(node.id);
+        }));
+        self.collapsePreviousFocusPath(nextFocusedPathIds);
 
         self.expanded[parentId] = true;
         for (i = 0; i < path.length; i++) {
