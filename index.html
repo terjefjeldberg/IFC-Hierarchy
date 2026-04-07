@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -7,50 +7,61 @@
     <title>IFC Hierarchy</title>
     <style>
       :root {
-        --bg: #f2f4f6;
-        --panel: #ffffff;
-        --panel-soft: #f7f8fa;
-        --line: #d7dde4;
-        --line-soft: #eceff3;
-        --text: #1d2731;
-        --muted: #6b7b8c;
-        --accent: #2f6fb5;
-        --selected: #dfeaf7;
-        --selected-line: #6aa0d8;
+        --bg: #171b22;
+        --panel: #252b34;
+        --panel-soft: #2b323d;
+        --panel-deep: #1d222b;
+        --panel-ink: #191d25;
+        --line: #39404b;
+        --line-soft: #303641;
+        --text: #f3f4f6;
+        --text-soft: #cfd4da;
+        --muted: #8f98a5;
+        --accent: #f6a21a;
+        --accent-soft: #d98910;
+        --accent-dim: #885918;
+        --selected: rgba(246, 162, 26, 0.16);
+        --selected-line: #f6a21a;
       }
       html,
       body {
         margin: 0;
         height: 100%;
-        background: var(--bg);
+        background:
+          radial-gradient(circle at top right, rgba(246, 162, 26, 0.12), transparent 32%),
+          linear-gradient(180deg, #252b34 0%, #171b22 100%);
         color: var(--text);
-        font-family: "Segoe UI", Tahoma, sans-serif;
+        font-family: "Segoe UI Variable", "Segoe UI", Tahoma, sans-serif;
+        overflow: hidden;
       }
       .app {
         height: 100%;
         display: grid;
         grid-template-rows: auto auto auto minmax(220px, 1.1fr) minmax(240px, 0.95fr) auto;
-        background: var(--panel);
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(0, 0, 0, 0)),
+          var(--panel);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
       }
       .top {
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 10px;
-        padding: 8px 12px;
+        padding: 10px 12px;
         border-bottom: 1px solid var(--line);
         background: var(--panel);
       }
       .title {
         margin: 0;
-        font-size: 12px;
+        font-size: 11px;
         font-weight: 700;
-        letter-spacing: 0.08em;
-        color: #22303d;
+        letter-spacing: 0.16em;
+        color: var(--accent);
       }
       .subtitle {
         font-size: 11px;
-        color: var(--muted);
+        color: var(--text-soft);
       }
       .toolbar,
       .columns,
@@ -62,29 +73,38 @@
       }
       .toolbar {
         gap: 6px;
-        padding: 5px 8px;
+        padding: 6px 8px;
         flex-wrap: wrap;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(0, 0, 0, 0)),
+          var(--panel-soft);
       }
       .tool-btn {
-        border: 1px solid #cbd4de;
-        background: #fff;
-        color: #314050;
-        border-radius: 4px;
-        padding: 4px 8px;
+        border: 1px solid rgba(246, 162, 26, 0.35);
+        background: var(--panel-ink);
+        color: var(--accent);
+        border-radius: 3px;
+        padding: 5px 9px;
         font-size: 11px;
         cursor: pointer;
+        transition:
+          background-color 120ms ease,
+          border-color 120ms ease,
+          color 120ms ease;
       }
       .tool-btn:hover:not(:disabled) {
-        border-color: #9caec0;
+        border-color: rgba(246, 162, 26, 0.65);
+        background: rgba(246, 162, 26, 0.1);
       }
       .tool-btn:disabled {
         cursor: default;
-        opacity: 0.55;
+        opacity: 0.45;
+        color: var(--muted);
       }
       .toolbar-note {
         margin-left: auto;
         font-size: 10px;
-        color: var(--muted);
+        color: var(--accent-soft);
         white-space: nowrap;
       }
       .columns {
@@ -94,38 +114,42 @@
         letter-spacing: 0.08em;
         color: var(--muted);
         justify-content: flex-start;
+        background: var(--panel-soft);
       }
       .tree {
         overflow: auto;
         min-height: 0;
-        background: var(--panel);
-        padding: 4px 0 10px;
+        background: var(--panel-deep);
+        padding: 2px 0 10px;
         border-bottom: 1px solid var(--line);
       }
       .tree-row {
         display: flex;
         align-items: center;
-        min-height: 24px;
-        gap: 4px;
+        min-height: 29px;
+        gap: 6px;
         padding-right: 8px;
       }
       .tree-toggle,
       .tree-spacer {
-        width: 16px;
-        min-width: 16px;
+        width: 18px;
+        min-width: 18px;
         text-align: center;
       }
       .tree-toggle {
         border: 0;
         background: transparent;
-        color: #556678;
+        color: var(--accent);
         cursor: pointer;
         font-size: 11px;
         padding: 0;
       }
+      .tree-toggle:hover {
+        color: #ffbf57;
+      }
       .tree-item {
         border: 0;
-        border-radius: 3px;
+        border-radius: 0;
         background: transparent;
         color: var(--text);
         display: flex;
@@ -133,20 +157,26 @@
         justify-content: flex-start;
         gap: 6px;
         width: 100%;
-        min-height: 24px;
-        padding: 2px 6px;
+        min-height: 29px;
+        padding: 4px 8px;
         cursor: pointer;
         min-width: 0;
+        transition:
+          background-color 120ms ease,
+          color 120ms ease;
       }
       .tree-item:hover {
-        background: #eef4fb;
+        background: rgba(246, 162, 26, 0.08);
+      }
+      .tree-item:hover .tree-title {
+        color: var(--accent);
       }
       .tree-item-in-path {
-        background: #f7fbff;
+        background: rgba(255, 255, 255, 0.03);
       }
       .tree-item-selected {
         background: var(--selected);
-        box-shadow: inset 3px 0 0 var(--selected-line);
+        box-shadow: inset 2px 0 0 var(--selected-line);
       }
       .tree-row + .tree-row .tree-item {
         border-top: 1px solid var(--line-soft);
@@ -158,7 +188,7 @@
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        color: #5c6d7e;
+        color: #9da5b1;
         text-align: center;
         flex: 0 0 16px;
       }
@@ -177,11 +207,15 @@
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-        font-size: 13px;
+        font-size: 12.5px;
+        font-weight: 500;
         text-align: left;
       }
+      .tree-item-selected .tree-title {
+        color: var(--accent);
+      }
       .tree-detail {
-        font-size: 11px;
+        font-size: 10.5px;
         color: var(--muted);
         text-align: left;
         white-space: nowrap;
@@ -190,18 +224,18 @@
       }
       .tree-loading {
         font-size: 10px;
-        color: var(--muted);
+        color: var(--accent-soft);
         white-space: nowrap;
       }
       .properties-panel {
         min-height: 0;
-        background: var(--panel-soft);
+        background: var(--panel);
       }
       .properties {
         min-height: 0;
         height: 100%;
         overflow: auto;
-        padding: 12px;
+        padding: 0 0 12px;
         box-sizing: border-box;
       }
       .properties-top {
@@ -209,7 +243,10 @@
         align-items: flex-start;
         justify-content: space-between;
         gap: 12px;
-        margin-bottom: 12px;
+        margin-bottom: 0;
+        padding: 14px 14px 12px;
+        border-bottom: 1px solid var(--line);
+        background: var(--panel);
       }
       .properties-heading-wrap {
         min-width: 0;
@@ -218,61 +255,67 @@
         font-size: 10px;
         text-transform: uppercase;
         letter-spacing: 0.08em;
-        color: var(--muted);
+        color: var(--accent);
         margin-bottom: 4px;
       }
       .properties-title {
-        font-size: 20px;
+        font-size: 21px;
         font-weight: 600;
         color: var(--text);
         line-height: 1.2;
         word-break: break-word;
       }
       .properties-helper {
-        margin-top: 6px;
+        margin-top: 8px;
         font-size: 11px;
-        color: var(--muted);
+        color: var(--accent-soft);
       }
       .properties-subtitle {
         font-size: 11px;
-        color: var(--muted);
+        color: var(--text-soft);
         white-space: nowrap;
-        padding-top: 18px;
+        padding-top: 20px;
       }
       .properties-empty {
         font-size: 12px;
         color: var(--muted);
-        padding: 12px 2px;
+        padding: 14px;
+        border-top: 1px solid var(--line-soft);
       }
       .properties-error {
-        color: #c44343;
+        color: #ff7b72;
       }
       .property-group {
-        border: 1px solid var(--line);
-        border-radius: 6px;
-        background: var(--panel);
+        border-top: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+        background: var(--panel-soft);
         overflow: hidden;
-        margin-bottom: 10px;
+        margin-top: 10px;
+      }
+      .property-group:first-of-type {
+        margin-top: 0;
       }
       .property-group-header {
         width: 100%;
         border: 0;
-        background: #f7f8fa;
+        background: var(--panel-soft);
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto auto;
         gap: 10px;
         align-items: center;
-        padding: 10px 12px;
+        padding: 13px 14px;
         cursor: pointer;
         text-align: left;
+        color: var(--accent);
+        transition: background-color 120ms ease;
       }
       .property-group-header:hover {
-        background: #eef4fb;
+        background: rgba(246, 162, 26, 0.08);
       }
       .property-group-title {
-        font-size: 13px;
-        font-weight: 600;
-        color: var(--text);
+        font-size: 14px;
+        font-weight: 500;
+        color: var(--accent);
         min-width: 0;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -280,29 +323,34 @@
       }
       .property-group-meta,
       .property-group-caret {
-        font-size: 11px;
-        color: var(--muted);
+        font-size: 12px;
+        color: var(--accent);
       }
       .property-group-body {
-        background: var(--panel);
+        background: var(--panel-deep);
       }
       .property-row {
         display: grid;
-        grid-template-columns: minmax(150px, 40%) 1fr;
+        grid-template-columns: minmax(120px, 42%) 1fr;
         border-top: 1px solid var(--line-soft);
+        background: var(--panel-deep);
+      }
+      .property-row:first-child {
+        border-top: 0;
       }
       .property-name {
-        padding: 8px 10px;
-        font-size: 12px;
-        color: var(--muted);
-        background: #fbfcfd;
-        border-right: 1px solid var(--line-soft);
+        padding: 12px 14px;
+        font-size: 12.5px;
+        color: var(--text);
+        background: var(--panel-ink);
+        border-right: 1px solid var(--line);
         word-break: break-word;
       }
       .property-value {
-        padding: 8px 10px;
-        font-size: 12px;
+        padding: 12px 14px;
+        font-size: 12.5px;
         color: var(--text);
+        background: var(--panel-deep);
         word-break: break-word;
       }
       .property-cell-button {
@@ -310,35 +358,102 @@
         border: 0;
         text-align: left;
         cursor: pointer;
+        display: block;
+        position: relative;
+        font: inherit;
+        appearance: none;
+        transition:
+          background-color 120ms ease,
+          color 120ms ease;
       }
-      .property-name.property-cell-button,
-      .property-value.property-cell-button {
-        background: inherit;
-      }
-      .property-name.property-cell-button:hover,
-      .property-value.property-cell-button:hover {
-        background: #eef4fb;
+      .property-cell-clickable {
         color: var(--accent);
+      }
+      .property-name.property-cell-clickable {
+        background:
+          linear-gradient(90deg, rgba(246, 162, 26, 0.08), rgba(0, 0, 0, 0) 88%),
+          var(--panel-ink);
+      }
+      .property-value.property-cell-clickable {
+        background:
+          linear-gradient(90deg, rgba(246, 162, 26, 0.06), rgba(0, 0, 0, 0) 88%),
+          var(--panel-deep);
+        padding-right: 30px;
+      }
+      .property-value.property-cell-clickable::after {
+        content: ">";
+        position: absolute;
+        top: 50%;
+        right: 12px;
+        transform: translateY(-50%);
+        color: var(--accent-dim);
+        font-size: 12px;
+      }
+      .property-cell-readonly {
+        color: var(--text);
+      }
+      .property-name.property-cell-clickable:hover,
+      .property-value.property-cell-clickable:hover {
+        background-color: rgba(246, 162, 26, 0.12);
+        color: #ffbf57;
       }
       .footer {
         justify-content: space-between;
         gap: 10px;
-        padding: 4px 10px;
+        padding: 6px 10px;
         font-size: 10px;
         color: var(--muted);
+        background: var(--panel-soft);
       }
       .footer-status.ok {
-        color: #2d7d47;
+        color: var(--accent);
       }
       .footer-status.err {
-        color: #c44343;
+        color: #ff7b72;
       }
       .footer-meta {
-        border: 1px solid #ccd5df;
+        border: 1px solid rgba(246, 162, 26, 0.35);
         border-radius: 999px;
         padding: 1px 7px;
-        background: #fff;
-        color: #5c6d7e;
+        background: var(--panel-ink);
+        color: var(--accent-soft);
+      }
+      .tool-btn:focus-visible,
+      .tree-toggle:focus-visible,
+      .tree-item:focus-visible,
+      .property-group-header:focus-visible,
+      .property-cell-button:focus-visible {
+        outline: 1px solid var(--accent);
+        outline-offset: -1px;
+      }
+      @media (max-width: 420px) {
+        .top {
+          padding: 8px 10px;
+        }
+        .toolbar {
+          gap: 5px;
+          padding: 6px;
+        }
+        .tool-btn {
+          flex: 1 1 auto;
+          min-width: calc(50% - 5px);
+        }
+        .toolbar-note {
+          width: 100%;
+          margin-left: 0;
+          padding-top: 4px;
+        }
+        .properties-top {
+          flex-direction: column;
+          gap: 6px;
+        }
+        .properties-subtitle {
+          padding-top: 0;
+          white-space: normal;
+        }
+        .property-row {
+          grid-template-columns: minmax(108px, 44%) 1fr;
+        }
       }
     </style>
   </head>
@@ -420,3 +535,4 @@
     </script>
   </body>
 </html>
+

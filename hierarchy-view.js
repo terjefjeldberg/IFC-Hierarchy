@@ -70,7 +70,7 @@
     inSelectedPath = state.selectedPath.indexOf(nodeId) >= 0;
 
     if (node.hasChildren) {
-      toggle = el("button", "tree-toggle", expanded ? "-" : "+");
+      toggle = el("button", "tree-toggle", expanded ? "v" : ">");
       toggle.onclick = function (event) {
         event.stopPropagation();
         handlers.onToggle(nodeId);
@@ -159,7 +159,7 @@
   function appendPropertyCell(row, className, text, clickable, onClick) {
     var cell;
     if (clickable) {
-      cell = el("button", className + " property-cell-button", text || "-");
+      cell = el("button", className + " property-cell-button property-cell-clickable", text || "-");
       cell.type = "button";
       cell.title = "Apply this property filter in StreamBIM";
       cell.onclick = function (event) {
@@ -167,7 +167,7 @@
         onClick();
       };
     } else {
-      cell = el("div", className, text || "-");
+      cell = el("div", className + " property-cell-readonly", text || "-");
     }
     row.appendChild(cell);
   }
@@ -197,7 +197,7 @@
       "div",
       "properties-helper",
       selectedNode
-        ? "Click a property name or value to apply that filter in StreamBIM."
+        ? "Orange property names and values can be applied as StreamBIM filters."
         : "Select an IFC object in StreamBIM to inspect its property sets and values."
     );
     heading.appendChild(helper);
@@ -237,12 +237,13 @@
     state.propertyGroups.forEach(function (group, index) {
       var groupId = String(group.id || "group-" + index);
       var isCollapsed = !!view.collapsedPropertyGroups[groupId];
+      var itemCount = (group.items || []).length;
       var card = el("section", "property-group");
       var header = el("button", "property-group-header");
       var title = el("div", "property-group-title", group.name || "Property Set");
-      var meta = el("div", "property-group-meta", (group.items || []).length + " values");
+      var meta = el("div", "property-group-meta", "(" + itemCount + ")");
       var body = el("div", "property-group-body");
-      var caret = el("span", "property-group-caret", isCollapsed ? "+" : "-");
+      var caret = el("span", "property-group-caret", isCollapsed ? ">" : "v");
 
       header.appendChild(title);
       header.appendChild(meta);
@@ -255,13 +256,14 @@
 
       if (!isCollapsed) {
         (group.items || []).forEach(function (item) {
-          var row = el("div", "property-row");
+          var row;
           var canFilter =
             group.groupType !== "identity" &&
             item &&
             item.filterable !== false &&
             item.value &&
             item.value !== "-";
+          row = el("div", "property-row " + (canFilter ? "property-row-filterable" : "property-row-readonly"));
           appendPropertyCell(row, "property-name", item.name || "Unnamed", canFilter, function () {
             view.applyPropertyFilter(state.selectedId, group, item);
           });
