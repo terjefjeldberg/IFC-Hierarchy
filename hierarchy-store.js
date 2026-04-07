@@ -393,10 +393,13 @@
 
   HierarchyStore.prototype.focusPickedObject = function (picked) {
     var self = this;
+    var initialHighlight;
     this.error = "";
     this.statusMessage = "Resolving selected object...";
     this.emit();
-    Promise.resolve(this.apiAdapter.highlightPickedObject(picked)).catch(function () {});
+    initialHighlight = Promise.resolve(this.apiAdapter.highlightPickedObject(picked)).catch(function () {
+      return "";
+    });
     return this.apiAdapter
       .resolvePickedObjectPath(picked)
       .then(function (result) {
@@ -404,7 +407,7 @@
         var parentId = self.rootId;
         var nextFocusedPathIds;
         var i;
-        if (!parentId) return;
+        if (!parentId) return initialHighlight;
 
         if (!path.length) {
           self.selectedId = "";
@@ -412,7 +415,7 @@
           self.clearProperties((result && result.message) || "Selected object is not present in the loaded IFC hierarchy");
           self.statusMessage = (result && result.message) || "Selected object is not present in the loaded IFC hierarchy";
           self.emit();
-          return;
+          return initialHighlight;
         }
 
         nextFocusedPathIds = [String(parentId)].concat(path.map(function (node) {
@@ -434,7 +437,13 @@
           ? "Selected: " + ((self.nodesById[self.selectedId] && self.nodesById[self.selectedId].name) || self.selectedId)
           : "Object resolved";
         self.emit();
-        return self.loadSelectedProperties(self.selectedId);
+        return self.loadSelectedProperties(self.selectedId).then(function () {
+          return initialHighlight.then(function () {
+            return Promise.resolve(self.apiAdapter.highlightPickedObject(picked)).catch(function () {
+              return "";
+            });
+          });
+        });
       })
       .catch(function (err) {
         self.error = err && err.message ? err.message : "Failed to resolve selected object";

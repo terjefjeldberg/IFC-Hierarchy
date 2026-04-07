@@ -1871,38 +1871,83 @@
     });
   };
 
+  HierarchyApi.prototype.collectHighlightCandidates = function (picked, infoResult) {
+    var result = infoResult || {};
+    var detail = result.detail;
+    var sources = [
+      detail,
+      detail && detail.raw,
+      detail && detail.attributes,
+      nestedValue(detail, ["object"]),
+      nestedValue(detail, ["item"]),
+      nestedValue(detail, ["data"]),
+      nestedValue(detail, ["result"]),
+      nestedValue(detail, ["selection"]),
+      picked,
+      nestedValue(picked, ["object"]),
+      nestedValue(picked, ["item"]),
+      nestedValue(picked, ["data"]),
+      nestedValue(picked, ["result"]),
+      nestedValue(picked, ["selection"]),
+    ];
+    var ordered = [
+      pickFromSources(sources, ["guid", "globalId", "ifcGuid", "GlobalId"]),
+      pickFromSources(sources, ["objectGuid", "object-guid", "ifcObjectGuid"]),
+      pickFromSources(sources, ["id", "objectId", "dbId", "expressId"]),
+      firstString(result && result.selectedId),
+    ];
+
+    asArray(result && result.identifiers).forEach(function (identifier) {
+      ordered.push(identifier);
+    });
+
+    return uniqueStrings(ordered);
+  };
+
   HierarchyApi.prototype.highlightPickedObject = function (picked) {
     var api = this.api || {};
     var self = this;
-    var identifiers = this.extractPickedObjectCandidates(picked);
-    var guid = firstString(identifiers[0]);
 
     if (typeof api.highlightObject !== "function") {
       return Promise.resolve("");
     }
 
-    function applyHighlight(targetGuid) {
-      if (!targetGuid) return Promise.resolve("");
+    function applyHighlightCandidates(candidates) {
+      var ordered = uniqueStrings(candidates);
+      var index = 0;
+
+      function next() {
+        var target = firstString(ordered[index++]);
+        if (!target) return Promise.resolve("");
+        return api.highlightObject(target).then(
+          function () {
+            return target;
+          },
+          function () {
+            return next();
+          }
+        );
+      }
+
       return Promise.resolve(
         typeof api.deHighlightAllObjects === "function" ? api.deHighlightAllObjects().catch(function () {}) : null
       ).then(function () {
-        return api.highlightObject(targetGuid).then(function () {
-          return targetGuid;
-        });
+        return next();
       });
     }
 
-    if (guid) {
-      return applyHighlight(guid).catch(function () {
+    return this.bestEffortGetObjectInfo(picked)
+      .then(function (result) {
+        return applyHighlightCandidates(self.collectHighlightCandidates(picked, result));
+      })
+      .catch(function () {
+        return applyHighlightCandidates(self.collectHighlightCandidates(picked, {
+          identifiers: self.extractPickedObjectCandidates(picked),
+        }));
+      })
+      .catch(function () {
         return "";
       });
-    }
-
-    return this.bestEffortGetObjectInfo(picked).then(function (result) {
-      return applyHighlight(firstString(result && result.selectedId, result && result.identifiers && result.identifiers[0]));
-    }).catch(function () {
-      return "";
-    });
   };
 
   HierarchyApi.prototype.pathHasHierarchyContext = function (path) {
