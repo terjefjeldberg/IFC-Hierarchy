@@ -874,7 +874,24 @@
     this.modelLayerSyncMessage = "";
     this.modelLayerSyncError = "";
   }
-
+  HierarchyApi.prototype.getViewerApi = function () {
+    var connectedApi = this.api || {};
+    var runtimeApi = global && global.StreamBIM && typeof global.StreamBIM === "object" ? global.StreamBIM : {};
+    return {
+      highlightObject:
+        typeof runtimeApi.highlightObject === "function"
+          ? runtimeApi.highlightObject.bind(runtimeApi)
+          : typeof connectedApi.highlightObject === "function"
+          ? connectedApi.highlightObject.bind(connectedApi)
+          : null,
+      deHighlightAllObjects:
+        typeof runtimeApi.deHighlightAllObjects === "function"
+          ? runtimeApi.deHighlightAllObjects.bind(runtimeApi)
+          : typeof connectedApi.deHighlightAllObjects === "function"
+          ? connectedApi.deHighlightAllObjects.bind(connectedApi)
+          : null,
+    };
+  };
   HierarchyApi.prototype.probeCapabilities = function () {
     var a = this.api || {};
     return {
@@ -2013,10 +2030,23 @@
       nestedValue(picked, ["result"]),
       nestedValue(picked, ["selection"]),
     ];
-
     return this.extractIdentityTokensFromSources(sources);
   };
-
+  HierarchyApi.prototype.extractPickedHighlightGuids = function (picked) {
+    var sources = [
+      picked,
+      nestedValue(picked, ["object"]),
+      nestedValue(picked, ["item"]),
+      nestedValue(picked, ["data"]),
+      nestedValue(picked, ["data", "attributes"]),
+      nestedValue(picked, ["selection"]),
+    ];
+    return appendNormalizedIdentityTokens([
+      pickFromSources(sources, ["guid", "globalId", "ifcGuid", "GlobalId"]),
+      pickFromSources(sources, ["objectGuid", "object-guid", "ifcObjectGuid"]),
+      pickFromSources(sources, ["Global Id", "GlobalId", "GUID"]),
+    ]);
+  };
   HierarchyApi.prototype.bestEffortGetObjectInfoForSearch = function (picked) {
     var self = this;
     var api = this.api || {};
@@ -2152,21 +2182,18 @@
   };
 
   HierarchyApi.prototype.highlightPickedObject = function (picked) {
-    var api = this.api || {};
+    var viewerApi = this.getViewerApi();
     var self = this;
-
-    if (typeof api.highlightObject !== "function") {
+    if (typeof viewerApi.highlightObject !== "function") {
       return Promise.resolve("");
     }
-
     function applyHighlightCandidates(candidates) {
       var ordered = uniqueStrings(candidates);
       var index = 0;
-
       function next() {
         var target = firstString(ordered[index++]);
         if (!target) return Promise.resolve("");
-        return api.highlightObject(target).then(
+        return viewerApi.highlightObject(target).then(
           function () {
             return target;
           },
@@ -2175,28 +2202,32 @@
           }
         );
       }
-
       return Promise.resolve(
-        typeof api.deHighlightAllObjects === "function" ? api.deHighlightAllObjects().catch(function () {}) : null
+        typeof viewerApi.deHighlightAllObjects === "function"
+          ? viewerApi.deHighlightAllObjects().catch(function () {})
+          : null
       ).then(function () {
         return next();
       });
     }
-
-    return this.bestEffortGetObjectInfo(picked)
-      .then(function (result) {
-        return applyHighlightCandidates(self.collectHighlightCandidates(picked, result));
+    return applyHighlightCandidates(this.extractPickedHighlightGuids(picked))
+      .then(function (highlighted) {
+        if (highlighted) return highlighted;
+        return self.bestEffortGetObjectInfo(picked).then(function (result) {
+          return applyHighlightCandidates(self.collectHighlightCandidates(picked, result));
+        });
       })
       .catch(function () {
-        return applyHighlightCandidates(self.collectHighlightCandidates(picked, {
-          identifiers: self.extractPickedObjectCandidates(picked),
-        }));
+        return applyHighlightCandidates(
+          self.collectHighlightCandidates(picked, {
+            identifiers: self.extractPickedObjectCandidates(picked),
+          })
+        );
       })
       .catch(function () {
         return "";
       });
   };
-
   HierarchyApi.prototype.pathHasHierarchyContext = function (path) {
     return asArray(path).some(function (node) {
       return node && (node.type === "site" || node.type === "building" || node.type === "storey");
