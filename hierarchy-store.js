@@ -2,8 +2,29 @@
   "use strict";
 
   function formatIfcSummary(summary) {
-    var count = summary && summary.sourceCount ? summary.sourceCount : 0;
-    return count === 1 ? "1 IFC source" : String(count) + " IFC sources";
+    var layerCount = summary && summary.layerCount ? summary.layerCount : 0;
+    var uploadCount = summary && summary.uploadedCount ? summary.uploadedCount : 0;
+    var parts = [];
+    if (layerCount) {
+      parts.push(layerCount === 1 ? "1 model layer" : String(layerCount) + " model layers");
+    }
+    if (uploadCount) {
+      parts.push(uploadCount === 1 ? "1 local IFC file" : String(uploadCount) + " local IFC files");
+    }
+    return parts.length ? parts.join(" + ") : "0 IFC sources";
+  }
+
+  function loadedSummaryStatus(summary, emptyMessage) {
+    if (summary && summary.sourceCount) {
+      return "Loaded " + formatIfcSummary(summary);
+    }
+    if (summary && summary.modelLayerMessage) {
+      return String(summary.modelLayerMessage);
+    }
+    if (summary && summary.modelLayerError) {
+      return String(summary.modelLayerError);
+    }
+    return emptyMessage || "No IFC sources available";
   }
 
   function HierarchyStore(apiAdapter) {
@@ -205,25 +226,49 @@
   };
 
   HierarchyStore.prototype.init = function () {
-    return this.reloadTree("Loading IFC hierarchy...");
+    return this.syncModelLayers(false);
+  };
+
+  HierarchyStore.prototype.syncModelLayers = function (force) {
+    var self = this;
+    this.error = "";
+    this.statusMessage = "Syncing IFC model layers...";
+    this.emit();
+    return this.apiAdapter
+      .syncIfcSources(force)
+      .then(function (summary) {
+        self.capabilities = self.apiAdapter.probeCapabilities();
+        self.resetTreeState();
+        return self.reloadTree("Loading IFC hierarchy...").then(function () {
+          self.error = summary && summary.sourceCount ? "" : (summary && summary.modelLayerError) || "";
+          self.statusMessage = loadedSummaryStatus(summary, "No IFC model layers available");
+          self.emit();
+        });
+      })
+      .catch(function (err) {
+        self.error = err && err.message ? err.message : "Failed to sync IFC model layers";
+        self.statusMessage = self.error;
+        self.emit();
+      });
   };
 
   HierarchyStore.prototype.loadIfcFiles = function (files) {
     var self = this;
     this.error = "";
-    this.statusMessage = "Loading selected IFC files...";
+    this.statusMessage = "Loading local IFC files...";
     this.emit();
     return this.apiAdapter
       .loadIfcFiles(files)
       .then(function (summary) {
         self.resetTreeState();
         return self.reloadTree("Loading IFC hierarchy...").then(function () {
-          self.statusMessage = "Loaded " + formatIfcSummary(summary);
+          self.error = "";
+          self.statusMessage = loadedSummaryStatus(summary, "Loaded local IFC files");
           self.emit();
         });
       })
       .catch(function (err) {
-        self.error = err && err.message ? err.message : "Failed to load IFC files";
+        self.error = err && err.message ? err.message : "Failed to load local IFC files";
         self.statusMessage = self.error;
         self.emit();
       });
@@ -232,21 +277,22 @@
   HierarchyStore.prototype.clearIfcFiles = function () {
     var self = this;
     this.error = "";
-    this.statusMessage = "Clearing IFC files...";
+    this.statusMessage = "Clearing local IFC files...";
     this.emit();
     return this.apiAdapter
       .clearUploadedIfcFiles()
       .then(function (summary) {
         self.resetTreeState();
         return self.reloadTree("Loading IFC hierarchy...").then(function () {
+          self.error = summary && summary.sourceCount ? "" : (summary && summary.modelLayerError) || "";
           self.statusMessage = summary && summary.sourceCount
             ? "Loaded " + formatIfcSummary(summary)
-            : "Cleared IFC files";
+            : loadedSummaryStatus(summary, "Cleared local IFC files");
           self.emit();
         });
       })
       .catch(function (err) {
-        self.error = err && err.message ? err.message : "Failed to clear IFC files";
+        self.error = err && err.message ? err.message : "Failed to clear local IFC files";
         self.statusMessage = self.error;
         self.emit();
       });

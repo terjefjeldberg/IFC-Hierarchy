@@ -1,4 +1,4 @@
-﻿(function (global) {
+(function (global) {
   "use strict";
 
   function asArray(value) {
@@ -724,11 +724,98 @@
     });
   }
 
+  function looksLikeIfcText(text) {
+    var sample = String(text || "").slice(0, 4096).toUpperCase();
+    if (!sample) return false;
+    return sample.indexOf("ISO-10303-21") >= 0 ||
+      (sample.indexOf("DATA;") >= 0 && sample.indexOf("ENDSEC;") >= 0 && sample.indexOf("IFC") >= 0);
+  }
+
+  function normalizeApiResponseBody(response) {
+    var parsed;
+    if (response == null) return null;
+    if (typeof response === "string") {
+      parsed = String(response).trim();
+      if (!parsed) return "";
+      if (
+        (parsed.charAt(0) === "{" && parsed.charAt(parsed.length - 1) === "}") ||
+        (parsed.charAt(0) === "[" && parsed.charAt(parsed.length - 1) === "]")
+      ) {
+        try {
+          return JSON.parse(parsed);
+        } catch (err) {}
+      }
+      return response;
+    }
+    if (typeof response === "object") {
+      if (typeof response.body === "string" || typeof response.text === "string") {
+        return normalizeApiResponseBody(response.body != null ? response.body : response.text);
+      }
+      if (response.data != null && typeof response.data !== "object") {
+        return normalizeApiResponseBody(response.data);
+      }
+    }
+    return response;
+  }
+
+  function extractTextFromApiResponse(response) {
+    var body = normalizeApiResponseBody(response);
+    if (typeof body === "string") return body;
+    if (body && typeof body.body === "string") return body.body;
+    if (body && typeof body.text === "string") return body.text;
+    if (body && typeof body.data === "string") return body.data;
+    return "";
+  }
+
+  function collectMatchingStrings(source, matcher, output, depth, seen) {
+    var list = output || [];
+    var currentDepth = depth || 0;
+    var references = seen || [];
+    if (source == null || currentDepth > 5) return list;
+    if (typeof source === "string") {
+      if (matcher("", source, null)) list.push(source);
+      return list;
+    }
+    if (typeof source !== "object") return list;
+    if (references.indexOf(source) >= 0) return list;
+    references.push(source);
+    if (Array.isArray(source)) {
+      source.forEach(function (item) {
+        collectMatchingStrings(item, matcher, list, currentDepth + 1, references);
+      });
+      return list;
+    }
+    Object.keys(source).forEach(function (key) {
+      var value = source[key];
+      if (typeof value === "string") {
+        if (matcher(key, value, source)) list.push(value);
+        return;
+      }
+      collectMatchingStrings(value, matcher, list, currentDepth + 1, references);
+    });
+    return list;
+  }
+
+  function toApiTarget(value) {
+    var target = firstString(value);
+    if (!target) return "";
+    if (/^https?:\/\//i.test(target)) return target;
+    if (target.charAt(0) === "/") return target;
+    if (target.indexOf("api/") === 0 || target.indexOf("pgw/") === 0) return "/" + target;
+    return "";
+  }
+
   function HierarchyApi(api) {
     this.api = api || null;
     this.uploadedIfcIndexes = [];
+    this.modelLayerIfcIndexes = [];
     this.mergedIfcIndex = null;
     this.mergedIfcIndexPromise = null;
+    this.projectIdValue = "";
+    this.projectIdPromise = null;
+    this.modelLayerSyncPromise = null;
+    this.modelLayerSyncMessage = "";
+    this.modelLayerSyncError = "";
   }
 
   HierarchyApi.prototype.probeCapabilities = function () {
@@ -741,23 +828,135 @@
       getObjectInfo: typeof a.getObjectInfo === "function",
       gotoObject: typeof a.gotoObject === "function",
       highlightObject: typeof a.highlightObject === "function",
+      getLayers: typeof a.getLayers === "function",
       makeApiRequest: typeof a.makeApiRequest === "function",
+      modelLayerSync: typeof a.makeApiRequest === "function",
       localIfcUpload: true,
     };
   };
 
+
+  HierarchyApi.prototype.getAllIfcIndexes = function () {
+    return this.modelLayerIfcIndexes.concat(this.uploadedIfcIndexes);
+  };
+
   HierarchyApi.prototype.getIfcIndexSummary = function () {
-    var names = [];
-    this.uploadedIfcIndexes.forEach(function (index) {
-      if (index && index.sourceFile) {
-        names.push(index.sourceFile);
-      }
-    });
-    return {
-      sourceCount: names.length,
-      sourceFiles: names,
-      uploadedCount: names.length,
+    var summary = {
+      sourceCount: 0,
+      sourceFiles: [],
+      uploadedCount: 0,
+      layerCount: 0,
+      modelLayerMessage: this.modelLayerSyncMessage,
+      modelLayerError: this.modelLayerSyncError,
     };
+    this.modelLayerIfcIndexes.forEach(function (index) {
+      if (!index) return;
+      summary.layerCount += 1;
+      if (index.sourceFile) summary.sourceFiles.push(index.sourceFile);
+    });
+    this.uploadedIfcIndexes.forEach(function (index) {
+      if (!index) return;
+      summary.uploadedCount += 1;
+      if (index.sourceFile) summary.sourceFiles.push(index.sourceFile);
+    });
+    summary.sourceFiles = uniqueStrings(summary.sourceFiles);
+    summary.sourceCount = summary.sourceFiles.length;
+    return summary;
+  };
+
+  HierarchyApi.prototype.getProjectId = function () {
+    var self = this;
+    var api = this.api || {};
+    if (this.projectIdValue) return Promise.resolve(this.projectIdValue);
+    if (this.projectIdPromise) return this.projectIdPromise;
+    if (typeof api.getProjectId !== "function") return Promise.resolve("");
+    this.projectIdPromise = api.getProjectId()
+      .then(function (projectId) {
+        self.projectIdValue = firstString(projectId);
+        self.projectIdPromise = null;
+        return self.projectIdValue;
+      })
+      .catch(function () {
+        self.projectIdPromise = null;
+        return "";
+      });
+    return this.projectIdPromise;
+  };
+
+  HierarchyApi.prototype.expandApiTargets = function (target) {
+    var normalized = toApiTarget(target) || firstString(target);
+    if (!normalized) return Promise.resolve([]);
+    if (/^https?:\/\//i.test(normalized) || normalized.indexOf("/pgw/") === 0) {
+      return Promise.resolve([normalized]);
+    }
+    return this.getProjectId().then(function (projectId) {
+      var targets = [normalized];
+      if (projectId && normalized.indexOf("/api/") === 0) {
+        targets.push("/pgw/" + projectId + normalized);
+        if (String(projectId).indexOf("project-") === 0) {
+          targets.push("/pgw/" + String(projectId).replace(/^project-/, "") + normalized);
+        } else {
+          targets.push("/pgw/project-" + projectId + normalized);
+        }
+      }
+      return uniqueStrings(targets);
+    });
+  };
+
+  HierarchyApi.prototype.makeApiRequestRaw = function (request) {
+    var api = this.api || {};
+    var target = firstString(request && request.url, request && request.path);
+    var accept = firstString(request && request.accept, nestedValue(request, ["headers", "Accept"]));
+    var contentType = firstString(request && request.contentType, nestedValue(request, ["headers", "Content-Type"]));
+    if (!target || typeof api.makeApiRequest !== "function") {
+      return Promise.reject(new Error("StreamBIM widget API does not expose makeApiRequest"));
+    }
+    return api.makeApiRequest({
+      method: firstString(request && request.method, "GET"),
+      url: target,
+      path: target,
+      accept: accept || undefined,
+      contentType: contentType || undefined,
+      headers: request && request.headers ? request.headers : undefined,
+      body: request && request.body != null ? request.body : undefined,
+    });
+  };
+
+  HierarchyApi.prototype.requestTextTarget = function (target) {
+    var self = this;
+    var accept = "text/plain,application/octet-stream,application/step,text/html,*/*";
+
+    function fetchDirect(url) {
+      if (typeof fetch !== "function") {
+        return Promise.reject(new Error("This browser does not expose fetch"));
+      }
+      return fetch(url, { credentials: "include" }).then(function (response) {
+        if (!response.ok) throw new Error("HTTP " + response.status);
+        return response.text();
+      });
+    }
+
+    return this.expandApiTargets(target).then(function (targets) {
+      var index = 0;
+      function next(lastError) {
+        var candidate = targets[index++];
+        if (!candidate) {
+          if (/^https?:\/\//i.test(String(target || ""))) {
+            return fetchDirect(String(target));
+          }
+          return Promise.reject(lastError || new Error("No request target available"));
+        }
+        return self.makeApiRequestRaw({ method: "GET", url: candidate, accept: accept }).then(
+          function (response) {
+            return extractTextFromApiResponse(response) || "";
+          },
+          function (err) {
+            return next(err);
+          }
+        );
+      }
+      return next();
+    });
   };
 
   HierarchyApi.prototype.invalidateIfcIndex = function () {
@@ -772,7 +971,9 @@
     return Promise.all(
       list.map(function (file) {
         return readFileText(file).then(function (text) {
-          return buildIfcIndexFromText(text, firstString(file && file.name, "uploaded.ifc"));
+          var index = buildIfcIndexFromText(text, firstString(file && file.name, "uploaded.ifc"));
+          index.sourceKind = "local-upload";
+          return index;
         });
       })
     ).then(function (indexes) {
@@ -810,11 +1011,240 @@
     if (this.mergedIfcIndexPromise) return this.mergedIfcIndexPromise;
 
     this.mergedIfcIndexPromise = Promise.resolve().then(function () {
-      self.mergedIfcIndex = mergeIfcIndexes(self.uploadedIfcIndexes);
+      self.mergedIfcIndex = mergeIfcIndexes(self.getAllIfcIndexes());
       return self.mergedIfcIndex;
     });
 
     return this.mergedIfcIndexPromise;
+  };
+
+  HierarchyApi.prototype.listModelLayerCollectionPaths = function () {
+    return [
+      "/api/v1/model-layers",
+      "/api/v1/model_layers",
+      "/api/v1/layers",
+      "/api/v1/3d-layers",
+      "/api/v1/layer-trees",
+      "/api/v1/layer_trees",
+      "/api/v1/v2/model-layers",
+      "/api/v1/v2/model_layers",
+      "/api/v1/v2/layers",
+    ];
+  };
+
+  HierarchyApi.prototype.deriveModelLayerDownloadTargets = function (row, collectionPath) {
+    var raw = (row && row.raw) || {};
+    var layerId = firstString(row && row.id);
+    var basePath = firstString(collectionPath).replace(/\/$/, "");
+    var explicitTargets = uniqueStrings(
+      collectMatchingStrings([row, raw, raw.attributes, raw.links, raw.relationships, raw.meta], function (key, value) {
+        var lowerKey = String(key || "").toLowerCase();
+        var lowerValue = String(value || "").toLowerCase();
+        if (!lowerValue) return false;
+        return (
+          (/download|url|uri|href|path|file/.test(lowerKey) &&
+            (/\.ifc(?:$|[?#])/.test(lowerValue) ||
+              /\/download(?:$|[/?#])/.test(lowerValue) ||
+              /\/file(?:$|[/?#])/.test(lowerValue) ||
+              /\/files?(?:$|[/?#])/.test(lowerValue) ||
+              /\/documents?(?:$|[/?#])/.test(lowerValue) ||
+              /^https?:\/\//.test(lowerValue))) ||
+          (/\.ifc(?:$|[?#])/.test(lowerValue) && /self|related/.test(lowerKey))
+        );
+      })
+        .map(toApiTarget)
+        .filter(Boolean)
+    );
+    var guessedTargets = [];
+    if (layerId) {
+      ["/api/v1/model-layers/", "/api/v1/model_layers/", "/api/v1/layers/", "/api/v1/3d-layers/", "/api/v1/v2/model-layers/", "/api/v1/v2/model_layers/", "/api/v1/v2/layers/"]
+        .forEach(function (prefix) {
+          var encodedId = encodeURIComponent(layerId);
+          guessedTargets.push(prefix + encodedId + "/download");
+          guessedTargets.push(prefix + encodedId + "/file");
+          guessedTargets.push(prefix + encodedId + "/source");
+          guessedTargets.push(prefix + encodedId + "/source-file");
+          guessedTargets.push(prefix + encodedId + "/ifc");
+        });
+      if (basePath) {
+        guessedTargets.push(basePath + "/" + encodeURIComponent(layerId));
+        guessedTargets.push(basePath + "/" + encodeURIComponent(layerId) + "/download");
+        guessedTargets.push(basePath + "/" + encodeURIComponent(layerId) + "/file");
+      }
+    }
+    return uniqueStrings(explicitTargets.concat(guessedTargets));
+  };
+
+  HierarchyApi.prototype.buildModelLayerSource = function (row, collectionPath, index) {
+    var raw = (row && row.raw) || {};
+    var attributes = raw.attributes || {};
+    var layerId = firstString(row && row.id, "layer-" + index);
+    var layerName = firstString(row && row.name, attributes.name, attributes.title, attributes.label, "Model layer " + (index + 1));
+    var sourceFile = firstString(
+      attributes.sourceFileName,
+      attributes["source-file-name"],
+      attributes.originalFileName,
+      attributes["original-file-name"],
+      attributes.fileName,
+      attributes["file-name"],
+      attributes.filename,
+      attributes.name,
+      row && row.name,
+      layerName
+    );
+    var downloadTargets = this.deriveModelLayerDownloadTargets(row, collectionPath);
+    var hints = uniqueStrings([
+      collectionPath,
+      row && row.type,
+      layerName,
+      sourceFile,
+      pickFromSources([attributes, raw], ["kind", "mimeType", "mime-type", "format", "extension", "ext", "fileType", "file-type", "layerType", "layer-type", "modelType", "model-type", "category"]),
+    ]);
+    var lowerHints = hints.join(" ").toLowerCase();
+    var looksIfc = lowerHints.indexOf("ifc") >= 0 || /\.ifc(?:$|[?#])/i.test(sourceFile) || downloadTargets.some(function (target) {
+      return /\.ifc(?:$|[?#])/i.test(target);
+    });
+    var looksModel = /model|layer|3d/.test(lowerHints) && !/pdf|dwg|image|raster|map/.test(lowerHints);
+    if (!downloadTargets.length) return null;
+    if (!looksIfc && !looksModel) return null;
+    return {
+      layerId: layerId,
+      layerName: layerName,
+      sourceFile: sourceFile,
+      collectionPath: collectionPath,
+      downloadTargets: downloadTargets,
+    };
+  };
+
+  HierarchyApi.prototype.buildModelLayerSourcesFromRows = function (rows, collectionPath) {
+    var self = this;
+    var seen = {};
+    return asArray(rows)
+      .map(function (row, index) {
+        return self.buildModelLayerSource(row, collectionPath, index);
+      })
+      .filter(function (source) {
+        var key;
+        if (!source) return false;
+        key = firstString(source.layerId, source.sourceFile, source.downloadTargets[0]) + "|" + firstString(source.downloadTargets[0]);
+        if (seen[key]) return false;
+        seen[key] = true;
+        return true;
+      });
+  };
+
+  HierarchyApi.prototype.findModelLayerSources = function () {
+    var self = this;
+    var collectionPaths = this.listModelLayerCollectionPaths();
+    return collectionPaths
+      .reduce(function (promise, collectionPath) {
+        return promise.then(function (sources) {
+          return self.tryJsonApiCollection(collectionPath).then(function (rows) {
+            return sources.concat(self.buildModelLayerSourcesFromRows(rows, collectionPath));
+          });
+        });
+      }, Promise.resolve([]))
+      .then(function (sources) {
+        var seen = {};
+        return sources.filter(function (source) {
+          var key = firstString(source.sourceFile, source.layerId, source.downloadTargets[0]) + "|" + source.downloadTargets.join("|");
+          if (seen[key]) return false;
+          seen[key] = true;
+          return true;
+        });
+      });
+  };
+
+  HierarchyApi.prototype.loadIfcIndexFromLayerSource = function (source) {
+    var self = this;
+    var targets = asArray(source && source.downloadTargets);
+    function next(index, lastError) {
+      var target = targets[index];
+      if (!target) {
+        return Promise.reject(lastError || new Error("No IFC download target resolved for model layer"));
+      }
+      return self.requestTextTarget(target).then(
+        function (text) {
+          var indexData;
+          if (!looksLikeIfcText(text)) {
+            return next(index + 1, new Error("Response did not contain IFC text"));
+          }
+          indexData = buildIfcIndexFromText(text, firstString(source && source.sourceFile, source && source.layerName, "model-layer.ifc"));
+          if (!indexData || !indexData.rootId) {
+            return next(index + 1, new Error("Downloaded IFC source did not contain a readable hierarchy"));
+          }
+          indexData.sourceKind = "model-layer";
+          indexData.layerId = firstString(source && source.layerId);
+          indexData.layerName = firstString(source && source.layerName, source && source.sourceFile);
+          indexData.sourceTarget = target;
+          return indexData;
+        },
+        function (err) {
+          return next(index + 1, err);
+        }
+      );
+    }
+    return next(0);
+  };
+
+  HierarchyApi.prototype.syncIfcSources = function (force) {
+    var self = this;
+    var api = this.api || {};
+    if (this.modelLayerSyncPromise && !force) return this.modelLayerSyncPromise;
+    if (typeof api.makeApiRequest !== "function") {
+      this.modelLayerSyncMessage = "";
+      this.modelLayerSyncError = "";
+      return Promise.resolve(this.getIfcIndexSummary());
+    }
+    this.modelLayerSyncError = "";
+    this.modelLayerSyncMessage = "Checking StreamBIM model layers...";
+    this.modelLayerSyncPromise = this.findModelLayerSources()
+      .then(function (sources) {
+        var loaded = [];
+        var skipped = [];
+        function next(index) {
+          if (index >= sources.length) return Promise.resolve();
+          return self.loadIfcIndexFromLayerSource(sources[index]).then(
+            function (ifcIndex) {
+              if (ifcIndex) loaded.push(ifcIndex);
+            },
+            function () {
+              skipped.push(sources[index]);
+            }
+          ).then(function () {
+            return next(index + 1);
+          });
+        }
+        return next(0).then(function () {
+          self.modelLayerIfcIndexes = loaded;
+          self.invalidateIfcIndex();
+          if (!sources.length) {
+            self.modelLayerSyncMessage = "No IFC model layers with downloadable source found in this project";
+          } else if (loaded.length) {
+            self.modelLayerSyncMessage = skipped.length
+              ? "Loaded " + loaded.length + " IFC model layer" + (loaded.length === 1 ? "" : "s") + ", skipped " + skipped.length
+              : "Loaded " + loaded.length + " IFC model layer" + (loaded.length === 1 ? "" : "s");
+          } else {
+            self.modelLayerSyncMessage = "Found model layers, but none exposed downloadable IFC source";
+          }
+          return self.loadIfcIndex().then(function () {
+            return self.getIfcIndexSummary();
+          });
+        });
+      })
+      .catch(function (err) {
+        self.modelLayerSyncError = err && err.message ? err.message : "Failed to inspect StreamBIM model layers";
+        self.modelLayerSyncMessage = "";
+        return self.getIfcIndexSummary();
+      })
+      .then(function (summary) {
+        self.modelLayerSyncPromise = null;
+        return summary;
+      }, function (err) {
+        self.modelLayerSyncPromise = null;
+        throw err;
+      });
+    return this.modelLayerSyncPromise;
   };
 
   HierarchyApi.prototype.mapIndexedNode = function (indexedNode) {
@@ -825,7 +1255,7 @@
       name: firstString(indexedNode.name, indexedNode.ifcClass, indexedNode.id),
       hasChildren: asArray(indexedNode.childrenIds).length > 0,
       meta: {
-        source: "ifc-index",
+        source: indexedNode.sourceKind || "ifc-index",
         objectId: firstString(indexedNode.guid, indexedNode.id),
         ifcClass: indexedNode.ifcClass,
         stepId: indexedNode.stepId,
@@ -897,7 +1327,7 @@
         return {
           node: null,
           groups: [],
-          message: "Selected object is not present in the loaded IFC files",
+          message: "Selected object is not present in the available IFC sources",
         };
       }
       groups.push({
@@ -970,15 +1400,23 @@
   HierarchyApi.prototype.fetchRoot = function () {
     var self = this;
     return this.loadIfcIndex().then(function (index) {
+      var emptyMessage;
       if (index && index.rootId && index.nodes && index.nodes[index.rootId]) {
         return self.mapIndexedNode(index.nodes[index.rootId]);
       }
+      emptyMessage = self.modelLayerSyncError
+        ? self.modelLayerSyncError
+        : self.modelLayerSyncMessage
+        ? self.modelLayerSyncMessage
+        : typeof (self.api || {}).makeApiRequest === "function"
+        ? "Sync model layers or add local IFC files to build the hierarchy"
+        : "Add local IFC files to build the hierarchy";
       return {
-        id: "note::upload-required",
+        id: "note::ifc-source-required",
         type: "note",
-        name: "Load one or more IFC files to build the hierarchy",
+        name: emptyMessage,
         hasChildren: false,
-        meta: { source: "upload-required" },
+        meta: { source: "ifc-source-required" },
       };
     });
   };
@@ -1316,8 +1754,8 @@
             path: [],
             pathSource: "missing-from-ifc",
             message: ifcSummary && ifcSummary.sourceCount
-              ? "Selected object is not present in the loaded IFC files"
-              : "Load one or more IFC files before selecting objects",
+              ? "Selected object is not present in the available IFC sources"
+              : "Sync model layers or add local IFC files before selecting objects",
           };
         });
       });
@@ -1476,18 +1914,40 @@
   };
 
   HierarchyApi.prototype.tryJsonApiCollection = function (path) {
-    var api = this.api;
-    if (!api || typeof api.makeApiRequest !== "function") {
-      return Promise.resolve([]);
-    }
-    return api
-      .makeApiRequest({
-        method: "GET",
-        path: path,
-        headers: { Accept: "application/vnd.api+json" },
-      })
-      .then(function (res) {
-        return asArray(res && res.data).map(mapJsonApiRow);
+    var self = this;
+    return this.expandApiTargets(path)
+      .then(function (targets) {
+        var index = 0;
+        function next() {
+          var target = targets[index++];
+          if (!target) return Promise.resolve([]);
+          return self
+            .makeApiRequestRaw({
+              method: "GET",
+              url: target,
+              accept: "application/vnd.api+json",
+            })
+            .then(function (response) {
+              var body = normalizeApiResponseBody(response);
+              var rows = asArray(
+                body && body.data != null
+                  ? body.data
+                  : body && body.items != null
+                  ? body.items
+                  : body && body.results != null
+                  ? body.results
+                  : Array.isArray(body)
+                  ? body
+                  : []
+              ).map(mapJsonApiRow);
+              if (rows.length) return rows;
+              return next();
+            })
+            .catch(function () {
+              return next();
+            });
+        }
+        return next();
       })
       .catch(function () {
         return [];

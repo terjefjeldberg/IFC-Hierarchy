@@ -151,9 +151,16 @@
   }
 
   function formatIfcSummary(summary) {
-    var count = summary && summary.sourceCount ? summary.sourceCount : 0;
-    if (!count) return "No IFC loaded";
-    return count === 1 ? "1 IFC loaded" : count + " IFC loaded";
+    var layerCount = summary && summary.layerCount ? summary.layerCount : 0;
+    var uploadCount = summary && summary.uploadedCount ? summary.uploadedCount : 0;
+    var parts = [];
+    if (layerCount) {
+      parts.push(layerCount === 1 ? "1 model layer" : layerCount + " model layers");
+    }
+    if (uploadCount) {
+      parts.push(uploadCount === 1 ? "1 local IFC" : uploadCount + " local IFC");
+    }
+    return parts.length ? parts.join(" + ") : "No IFC loaded";
   }
 
   function appendPropertyCell(row, className, text, clickable, onClick) {
@@ -294,6 +301,7 @@
     this.collapseBtn = document.getElementById("collapse-all");
     this.expand2Btn = document.getElementById("expand-2");
     this.expand4Btn = document.getElementById("expand-4");
+    this.syncBtn = document.getElementById("sync-layers");
     this.loadBtn = document.getElementById("load-ifc");
     this.clearBtn = document.getElementById("clear-ifc");
     this.fileInput = document.getElementById("ifc-files");
@@ -321,6 +329,11 @@
     if (this.expand4Btn) {
       this.expand4Btn.onclick = function () {
         self.store.expandToDepth(4);
+      };
+    }
+    if (this.syncBtn) {
+      this.syncBtn.onclick = function () {
+        self.store.syncModelLayers(true);
       };
     }
     if (this.loadBtn && this.fileInput) {
@@ -362,11 +375,19 @@
       this.ifcSummaryEl.title = (ifcSummary.sourceFiles || []).join("\n") || "No IFC sources loaded";
     }
 
+    tooltipLines.push("Model layers: " + (ifcSummary.layerCount || 0));
+    tooltipLines.push("Local uploads: " + (ifcSummary.uploadedCount || 0));
     tooltipLines.push("IFC sources: " + ((ifcSummary.sourceFiles || []).join(", ") || "none"));
     tooltipLines.push("Capabilities: " + (caps.join(", ") || "none"));
     this.metaEl.textContent = (ifcSummary.sourceCount || 0) + " IFC";
     this.metaEl.title = tooltipLines.join("\n");
 
+    if (this.syncBtn) {
+      this.syncBtn.disabled = !state.capabilities.modelLayerSync;
+      this.syncBtn.title = state.capabilities.modelLayerSync
+        ? "Refresh IFC data from StreamBIM model layers"
+        : "This widget context does not expose makeApiRequest for model layer sync";
+    }
     if (this.clearBtn) {
       this.clearBtn.disabled = !(ifcSummary.uploadedCount > 0);
     }
