@@ -386,6 +386,36 @@
     return "element";
   }
 
+  function buildIfcClassGroupId(parentId, ifcClass) {
+    return (
+      "ifc-class-group::" +
+      encodeURIComponent(String(parentId || "")) +
+      "::" +
+      encodeURIComponent(firstString(ifcClass, "Unclassified"))
+    );
+  }
+
+  function parseIfcClassGroupId(nodeId) {
+    var match = String(nodeId || "").match(/^ifc-class-group::([^:]+)::(.+)$/);
+    if (!match) return null;
+    return {
+      parentId: decodeURIComponent(match[1]),
+      ifcClass: decodeURIComponent(match[2]),
+    };
+  }
+
+  function isStoreyIndexedNode(node) {
+    return !!(node && (node.type === "storey" || node.ifcClass === "IfcBuildingStorey"));
+  }
+
+  function groupedIfcClassName(node) {
+    return firstString(node && node.ifcClass, "Unclassified");
+  }
+
+  function isGroupableIndexedChild(parentNode, childNode) {
+    return !!(isStoreyIndexedNode(parentNode) && childNode && childNode.type === "element");
+  }
+
   function parseIfcRecords(records) {
     var entities = {};
     var parentByStep = {};
@@ -1265,16 +1295,129 @@
     };
   };
 
+  HierarchyApi.prototype.getIndexedChildNodes = function (index, parentIndexedNode) {
+    return asArray(parentIndexedNode && parentIndexedNode.childrenIds)
+      .map(function (childId) {
+        return index && index.nodes ? index.nodes[String(childId)] : null;
+      })
+      .filter(Boolean);
+  };
+
+  HierarchyApi.prototype.getIfcClassGroupingForIndexedNode = function (index, parentIndexedNode) {
+    var childNodes = this.getIndexedChildNodes(index, parentIndexedNode);
+    var groupsByClass = {};
+    var groupOrder = [];
+    var groupableCount = 0;
+
+    if (!isStoreyIndexedNode(parentIndexedNode) || childNodes.length < 2) return null;
+
+    childNodes.forEach(function (childNode) {
+      var ifcClass;
+      if (!isGroupableIndexedChild(parentIndexedNode, childNode)) return;
+      ifcClass = groupedIfcClassName(childNode);
+      if (!groupsByClass[ifcClass]) {
+        groupsByClass[ifcClass] = [];
+        groupOrder.push(ifcClass);
+      }
+      groupsByClass[ifcClass].push(childNode);
+      groupableCount += 1;
+    });
+
+    if (groupableCount < 2 || !groupOrder.length) return null;
+
+    return {
+      childNodes: childNodes,
+      groupsByClass: groupsByClass,
+      groupOrder: groupOrder,
+    };
+  };
+
+  HierarchyApi.prototype.createIfcClassGroupNode = function (parentIndexedNode, ifcClass, childNodes) {
+    var children = asArray(childNodes).filter(Boolean);
+    return {
+      id: buildIfcClassGroupId(parentIndexedNode && parentIndexedNode.id, ifcClass),
+      type: "ifc-class-group",
+      name: firstString(ifcClass, "Unclassified"),
+      hasChildren: children.length > 0,
+      meta: {
+        source: "ifc-class-group",
+        groupedIfcClass: firstString(ifcClass, "Unclassified"),
+        childCount: children.length,
+        groupedChildIds: children.map(function (childNode) {
+          return String(childNode.id);
+        }),
+        parentId: firstString(parentIndexedNode && parentIndexedNode.id),
+        sourceFile: firstString(
+          parentIndexedNode && parentIndexedNode.sourceFile,
+          children[0] && children[0].sourceFile
+        ),
+      },
+    };
+  };
+
+  HierarchyApi.prototype.resolveIfcClassGroupNode = function (index, nodeOrId) {
+    var node = nodeOrId && typeof nodeOrId === "object" ? nodeOrId : null;
+    var groupId = firstString(node && node.id, nodeOrId);
+    var meta = (node && node.meta) || {};
+    var parsed = parseIfcClassGroupId(groupId);
+    var parentId = firstString(meta.parentId, parsed && parsed.parentId);
+    var ifcClass = firstString(meta.groupedIfcClass, parsed && parsed.ifcClass, "Unclassified");
+    var parentIndexedNode = index && index.nodes ? index.nodes[String(parentId)] : null;
+    var grouping;
+    var childNodes;
+
+    if (!parentIndexedNode) return null;
+
+    grouping = this.getIfcClassGroupingForIndexedNode(index, parentIndexedNode);
+    if (!grouping || !grouping.groupsByClass[ifcClass]) return null;
+
+    childNodes = grouping.groupsByClass[ifcClass];
+    return {
+      id: buildIfcClassGroupId(parentIndexedNode.id, ifcClass),
+      ifcClass: ifcClass,
+      parentNode: parentIndexedNode,
+      childNodes: childNodes,
+      node: this.createIfcClassGroupNode(parentIndexedNode, ifcClass, childNodes),
+    };
+  };
+
   HierarchyApi.prototype.fetchChildrenFromIfcIndex = function (node) {
     var self = this;
     return this.loadIfcIndex().then(function (index) {
       var indexedNode;
+      var grouping;
+      var emittedGroups = {};
+      var groupInfo;
       if (!index || !index.nodes) return null;
+      if (node && node.type === "ifc-class-group") {
+        groupInfo = self.resolveIfcClassGroupNode(index, node);
+        if (!groupInfo) return [];
+        return groupInfo.childNodes
+          .map(function (childNode) {
+            return self.mapIndexedNode(childNode);
+          })
+          .filter(Boolean);
+      }
       indexedNode = index.nodes[String(node && node.id)];
       if (!indexedNode) return null;
-      return asArray(indexedNode.childrenIds)
-        .map(function (childId) {
-          return self.mapIndexedNode(index.nodes[String(childId)]);
+      grouping = self.getIfcClassGroupingForIndexedNode(index, indexedNode);
+      if (!grouping) {
+        return self.getIndexedChildNodes(index, indexedNode)
+          .map(function (childNode) {
+            return self.mapIndexedNode(childNode);
+          })
+          .filter(Boolean);
+      }
+      return grouping.childNodes
+        .map(function (childNode) {
+          var ifcClass;
+          if (!isGroupableIndexedChild(indexedNode, childNode)) {
+            return self.mapIndexedNode(childNode);
+          }
+          ifcClass = groupedIfcClassName(childNode);
+          if (emittedGroups[ifcClass]) return null;
+          emittedGroups[ifcClass] = true;
+          return self.createIfcClassGroupNode(indexedNode, ifcClass, grouping.groupsByClass[ifcClass]);
         })
         .filter(Boolean);
     });
@@ -1284,10 +1427,27 @@
     var path = [];
     var seen = {};
     var currentId = String(nodeId || "");
+    var currentNode;
+    var parentId;
+    var parentNode;
+    var grouping;
+    var ifcClass;
     while (currentId && index.nodes[currentId] && !seen[currentId]) {
+      currentNode = index.nodes[currentId];
       seen[currentId] = true;
-      path.push(this.mapIndexedNode(index.nodes[currentId]));
-      currentId = index.nodes[currentId].parentId ? String(index.nodes[currentId].parentId) : "";
+      path.push(this.mapIndexedNode(currentNode));
+      parentId = currentNode.parentId ? String(currentNode.parentId) : "";
+      parentNode = parentId && index.nodes[parentId] ? index.nodes[parentId] : null;
+      if (parentNode) {
+        grouping = this.getIfcClassGroupingForIndexedNode(index, parentNode);
+        if (grouping && isGroupableIndexedChild(parentNode, currentNode)) {
+          ifcClass = groupedIfcClassName(currentNode);
+          if (grouping.groupsByClass[ifcClass]) {
+            path.push(this.createIfcClassGroupNode(parentNode, ifcClass, grouping.groupsByClass[ifcClass]));
+          }
+        }
+      }
+      currentId = parentId;
     }
     path.reverse();
     if (index.rootId && path.length && String(path[0].id) === String(index.rootId)) {
@@ -1322,8 +1482,39 @@
     var self = this;
     return this.loadIfcIndex().then(function (index) {
       var indexedNode = index && index.nodes && index.nodes[String(nodeId)];
+      var groupInfo;
       var groups = [];
       if (!indexedNode) {
+        groupInfo = self.resolveIfcClassGroupNode(index, nodeId);
+        if (groupInfo) {
+          return {
+            node: groupInfo.node,
+            groups: [
+              {
+                id: "object::" + String(groupInfo.id),
+                name: "Object type",
+                groupType: "identity",
+                items: [
+                  createPropertyEntry("IFC class", groupInfo.ifcClass, "identity", { filterable: false }),
+                  createPropertyEntry("Objects", String(groupInfo.childNodes.length), "identity", { filterable: false }),
+                  createPropertyEntry(
+                    "Parent",
+                    firstString(groupInfo.parentNode.name, groupInfo.parentNode.ifcClass, groupInfo.parentNode.id),
+                    "identity",
+                    { filterable: false }
+                  ),
+                  createPropertyEntry(
+                    "Source file",
+                    firstString(groupInfo.node.meta && groupInfo.node.meta.sourceFile),
+                    "identity",
+                    { filterable: false }
+                  ),
+                ],
+              },
+            ],
+            message: "Select an object inside this type group to inspect IFC properties",
+          };
+        }
         return {
           node: null,
           groups: [],

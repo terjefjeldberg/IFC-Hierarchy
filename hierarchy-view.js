@@ -25,6 +25,9 @@
     if (type === "storey") {
       return '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.25h10"></path><path d="M3 8h10"></path><path d="M3 11.75h10"></path><path d="M4.5 2.75v10.5"></path></svg>';
     }
+    if (type === "ifc-class-group") {
+      return '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.25h7.5v3.25H3Z"></path><path d="M5.5 8.25H13v3H5.5Z"></path><path d="M3 12.25h7.5v1.5H3Z"></path></svg>';
+    }
     if (type === "workspace") {
       return '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="3"></rect><rect x="2" y="7.5" width="12" height="3"></rect><rect x="2" y="12" width="12" height="1.5"></rect></svg>';
     }
@@ -35,7 +38,12 @@
   }
 
   function detailForNode(node) {
+    var childCount;
     if (!node) return "";
+    if (node.type === "ifc-class-group") {
+      childCount = node.meta && node.meta.childCount ? Number(node.meta.childCount) : 0;
+      return childCount === 1 ? "1 object" : String(childCount) + " objects";
+    }
     if (node.meta && node.meta.ifcClass) return String(node.meta.ifcClass);
     if (node.type === "model" && node.meta && node.meta.sourceFile) return String(node.meta.sourceFile);
     if (node.type === "project") return "IfcProject";
