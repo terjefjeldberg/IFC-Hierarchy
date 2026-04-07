@@ -28,6 +28,33 @@
       });
   }
 
+  function normalizeIdentityToken(value) {
+    return String(value == null ? "" : value)
+      .trim()
+      .replace(/^T~/, "");
+  }
+
+  function appendNormalizedIdentityTokens(values) {
+    var expanded = [];
+    asArray(values).forEach(function (value) {
+      var raw = value == null ? "" : String(value).trim();
+      var normalized = normalizeIdentityToken(raw);
+      if (raw) expanded.push(raw);
+      if (normalized && normalized !== raw) expanded.push(normalized);
+    });
+    return uniqueStrings(expanded);
+  }
+
+  function compactObject(source) {
+    var output = {};
+    Object.keys(source || {}).forEach(function (key) {
+      if (source[key] == null) return;
+      if (typeof source[key] === "string" && !String(source[key]).trim()) return;
+      output[key] = source[key];
+    });
+    return output;
+  }
+
   function relationId(row, relationName) {
     var rel = row && row.raw && row.raw.relationships;
     var data = rel && rel[relationName] && rel[relationName].data;
@@ -1816,6 +1843,167 @@
       .filter(Boolean);
   };
 
+  HierarchyApi.prototype.normalizeObjectInfoPayload = function (source) {
+    var normalized = source;
+    if (!normalized || typeof normalized !== "object" || Array.isArray(normalized)) {
+      return normalized;
+    }
+    if (
+      normalized.data &&
+      typeof normalized.data === "object" &&
+      !Array.isArray(normalized.data)
+    ) {
+      normalized = Object.assign({}, normalized.data, {
+        _jsonApiDocument: source,
+      });
+    }
+    if (normalized.attributes && typeof normalized.attributes === "object") {
+      normalized = Object.assign({}, normalized.attributes, normalized);
+    }
+    if (!normalized.guid) {
+      normalized.guid = firstString(
+        normalized.globalId,
+        normalized.ifcGuid,
+        normalized.GlobalId,
+        nestedValue(normalized, ["properties", "Global Id"]),
+        nestedValue(normalized, ["properties", "GlobalId"]),
+        nestedValue(normalized, ["properties", "GUID"]),
+        nestedValue(normalized, ["properties", "guid"])
+      );
+    }
+    if (!normalized.id) {
+      normalized.id = firstString(normalized.objectId, normalized.dbId, normalized.expressId);
+    }
+    return normalized;
+  };
+
+  HierarchyApi.prototype.extractObjectsFromInfoResponse = function (response) {
+    var body = normalizeApiResponseBody(response);
+    var rows = [];
+    if (!body) return [];
+    if (Array.isArray(body)) {
+      rows = body;
+    } else if (Array.isArray(body.items)) {
+      rows = body.items;
+    } else if (Array.isArray(body.objects)) {
+      rows = body.objects;
+    } else if (Array.isArray(body.results)) {
+      rows = body.results;
+    } else if (Array.isArray(body.rows)) {
+      rows = body.rows;
+    } else if (Array.isArray(body.data)) {
+      rows = body.data;
+    } else if (body && typeof body === "object") {
+      rows = [body];
+    }
+    return rows
+      .map(this.normalizeObjectInfoPayload.bind(this))
+      .filter(Boolean);
+  };
+
+  HierarchyApi.prototype.extractIdentityTokensFromSources = function (sources) {
+    var combinedSources = asArray(sources).concat(
+      asArray(sources).map(function (source) {
+        return source && source.properties ? source.properties : null;
+      })
+    );
+    return appendNormalizedIdentityTokens([
+      pickFromSources(combinedSources, ["guid", "globalId", "ifcGuid", "GlobalId"]),
+      pickFromSources(combinedSources, ["objectGuid", "object-guid", "ifcObjectGuid"]),
+      pickFromSources(combinedSources, ["id", "objectId", "dbId", "expressId"]),
+      pickFromSources(combinedSources, ["Global Id", "GlobalId", "GUID", "guid"]),
+    ]);
+  };
+
+  HierarchyApi.prototype.getSearchBuildingId = function () {
+    var api = this.api || {};
+    if (typeof api.getBuildingId !== "function") {
+      return Promise.resolve("1000");
+    }
+    return api.getBuildingId()
+      .then(function (buildingId) {
+        return firstString(buildingId, "1000");
+      })
+      .catch(function () {
+        return "1000";
+      });
+  };
+
+  HierarchyApi.prototype.buildObjectInfoForSearchQueries = function (buildingId, identifiers) {
+    var keys = ["GUID", "GlobalId", "Global Id", "ifcGuid", "id", "objectId"];
+    var queries = [];
+    var seen = {};
+    appendNormalizedIdentityTokens(identifiers).forEach(function (value) {
+      if (!value) return;
+      queries.push(value);
+      queries.push({ id: value });
+      queries.push({ guid: value });
+      keys.forEach(function (key) {
+        queries.push({
+          filter: { key: key, value: value },
+          page: { limit: 1, skip: 0 },
+          fieldUnion: true,
+        });
+        queries.push({
+          filter: {
+            rules: [[
+              compactObject({
+                buildingId: buildingId,
+                propKey: key,
+                propType: "str",
+                propValue: value,
+              }),
+            ]],
+          },
+          page: { limit: 1, skip: 0 },
+          fieldUnion: true,
+        });
+      });
+    });
+    return queries.filter(function (query) {
+      var signature = typeof query === "string" ? query : JSON.stringify(query);
+      if (seen[signature]) return false;
+      seen[signature] = true;
+      return true;
+    });
+  };
+
+  HierarchyApi.prototype.selectBestMatchingObjectFromInfoResponse = function (response, identifiers, fallback) {
+    var self = this;
+    var objects = this.extractObjectsFromInfoResponse(response);
+    var wanted = appendNormalizedIdentityTokens(
+      asArray(identifiers).concat(
+        this.extractIdentityTokensFromSources([
+          fallback,
+          fallback && fallback.raw,
+          fallback && fallback.attributes,
+          fallback && fallback.properties,
+          nestedValue(fallback, ["data"]),
+          nestedValue(fallback, ["data", "attributes"]),
+        ])
+      )
+    );
+    if (!objects.length) return null;
+    if (!wanted.length) return objects[0];
+    return (
+      objects.find(function (object) {
+        var tokens = appendNormalizedIdentityTokens(
+          self.extractIdentityTokensFromSources([
+            object,
+            object && object.raw,
+            object && object.attributes,
+            object && object.properties,
+            nestedValue(object, ["data"]),
+            nestedValue(object, ["data", "attributes"]),
+          ])
+        );
+        return tokens.some(function (token) {
+          return wanted.indexOf(token) >= 0;
+        });
+      }) || objects[0]
+    );
+  };
+
   HierarchyApi.prototype.extractPickedObjectCandidates = function (picked) {
     var sources = [
       picked,
@@ -1826,49 +2014,109 @@
       nestedValue(picked, ["selection"]),
     ];
 
-    return uniqueStrings([
-      pickFromSources(sources, ["guid", "globalId", "ifcGuid", "GlobalId"]),
-      pickFromSources(sources, ["id", "objectId", "dbId", "expressId"]),
-      pickFromSources(sources, ["objectGuid", "object-guid", "ifcObjectGuid"]),
-    ]);
+    return this.extractIdentityTokensFromSources(sources);
+  };
+
+  HierarchyApi.prototype.bestEffortGetObjectInfoForSearch = function (picked) {
+    var self = this;
+    var api = this.api || {};
+    var identifiers = this.extractPickedObjectCandidates(picked);
+    var queryIndex = 0;
+    if (typeof api.getObjectInfoForSearch !== "function") {
+      return Promise.resolve(null);
+    }
+    return this.getSearchBuildingId()
+      .then(function (buildingId) {
+        var queries = self.buildObjectInfoForSearchQueries(buildingId, identifiers);
+        function next() {
+          var query = queries[queryIndex++];
+          if (query == null) return Promise.resolve(null);
+          return api.getObjectInfoForSearch(query).then(
+            function (response) {
+              var matched = self.selectBestMatchingObjectFromInfoResponse(response, identifiers, picked);
+              if (matched) return matched;
+              return next();
+            },
+            function () {
+              return next();
+            }
+          );
+        }
+        return next();
+      })
+      .catch(function () {
+        return null;
+      });
   };
 
   HierarchyApi.prototype.bestEffortGetObjectInfo = function (picked) {
+    var self = this;
     var api = this.api || {};
     var identifiers = this.extractPickedObjectCandidates(picked);
     var index = 0;
-    if (typeof api.getObjectInfo !== "function") {
-      return Promise.resolve({ detail: null, identifiers: identifiers });
-    }
 
-    function next() {
-      var identifier;
-      if (index >= identifiers.length) {
+    function lookupViaGetObjectInfo() {
+      if (typeof api.getObjectInfo !== "function") {
         return Promise.resolve({ detail: null, identifiers: identifiers });
       }
-      identifier = identifiers[index++];
-      return api.getObjectInfo(identifier).then(
-        function (detail) {
-          return {
-            detail: detail || null,
-            identifiers: identifiers,
-            selectedId: identifier,
-          };
-        },
-        function () {
-          return next();
+      function next() {
+        var identifier;
+        if (index >= identifiers.length) {
+          return Promise.resolve({ detail: null, identifiers: identifiers });
         }
-      );
+        identifier = identifiers[index++];
+        return api.getObjectInfo(identifier).then(
+          function (detail) {
+            return {
+              detail: self.normalizeObjectInfoPayload(detail) || null,
+              identifiers: identifiers,
+              selectedId: identifier,
+            };
+          },
+          function () {
+            return next();
+          }
+        );
+      }
+      return next();
     }
 
-    return next().then(function (result) {
-      if (result.detail) return result;
-      return {
-        detail: null,
-        identifiers: identifiers,
-        selectedId: firstString(identifiers[0]),
-      };
-    });
+    return this.bestEffortGetObjectInfoForSearch(picked)
+      .then(function (searchDetail) {
+        var normalizedSearchDetail;
+        if (searchDetail) {
+          normalizedSearchDetail = self.normalizeObjectInfoPayload(searchDetail);
+          return {
+            detail: normalizedSearchDetail,
+            identifiers: appendNormalizedIdentityTokens(
+              identifiers.concat(
+                self.extractIdentityTokensFromSources([
+                  normalizedSearchDetail,
+                  normalizedSearchDetail && normalizedSearchDetail.raw,
+                  normalizedSearchDetail && normalizedSearchDetail.attributes,
+                  normalizedSearchDetail && normalizedSearchDetail.properties,
+                  nestedValue(normalizedSearchDetail, ["data"]),
+                  nestedValue(normalizedSearchDetail, ["data", "attributes"]),
+                ])
+              )
+            ),
+            selectedId: firstString(
+              normalizedSearchDetail && normalizedSearchDetail.guid,
+              normalizedSearchDetail && normalizedSearchDetail.id,
+              identifiers[0]
+            ),
+          };
+        }
+        return lookupViaGetObjectInfo();
+      })
+      .then(function (result) {
+        if (result.detail) return result;
+        return {
+          detail: null,
+          identifiers: appendNormalizedIdentityTokens(identifiers),
+          selectedId: firstString(identifiers[0]),
+        };
+      });
   };
 
   HierarchyApi.prototype.collectHighlightCandidates = function (picked, infoResult) {
@@ -1878,9 +2126,11 @@
       detail,
       detail && detail.raw,
       detail && detail.attributes,
+      detail && detail.properties,
+      nestedValue(detail, ["data"]),
+      nestedValue(detail, ["data", "attributes"]),
       nestedValue(detail, ["object"]),
       nestedValue(detail, ["item"]),
-      nestedValue(detail, ["data"]),
       nestedValue(detail, ["result"]),
       nestedValue(detail, ["selection"]),
       picked,
@@ -1890,18 +2140,15 @@
       nestedValue(picked, ["result"]),
       nestedValue(picked, ["selection"]),
     ];
-    var ordered = [
-      pickFromSources(sources, ["guid", "globalId", "ifcGuid", "GlobalId"]),
-      pickFromSources(sources, ["objectGuid", "object-guid", "ifcObjectGuid"]),
-      pickFromSources(sources, ["id", "objectId", "dbId", "expressId"]),
-      firstString(result && result.selectedId),
-    ];
+    var ordered = this.extractIdentityTokensFromSources(sources).concat(
+      appendNormalizedIdentityTokens([firstString(result && result.selectedId)])
+    );
 
     asArray(result && result.identifiers).forEach(function (identifier) {
       ordered.push(identifier);
     });
 
-    return uniqueStrings(ordered);
+    return appendNormalizedIdentityTokens(ordered);
   };
 
   HierarchyApi.prototype.highlightPickedObject = function (picked) {
@@ -1971,13 +2218,15 @@
           result && result.detail,
           result && result.detail && result.detail.raw,
           result && result.detail && result.detail.attributes,
+          result && result.detail && result.detail.properties,
+          result && result.detail && nestedValue(result.detail, ["data"]),
+          result && result.detail && nestedValue(result.detail, ["data", "attributes"]),
         ];
-        var detailIdentifiers = uniqueStrings(
-          pickedIdentifiers.concat([
-            pickFromSources(detailSources, ["guid", "globalId", "ifcGuid", "GlobalId"]),
-            pickFromSources(detailSources, ["id", "objectId", "dbId", "expressId"]),
-            pickFromSources(detailSources, ["objectGuid", "object-guid", "ifcObjectGuid"]),
-          ])
+        var detailIdentifiers = appendNormalizedIdentityTokens(
+          pickedIdentifiers.concat(
+            result && result.identifiers,
+            self.extractIdentityTokensFromSources(detailSources)
+          )
         );
 
         return self.resolvePathFromIfcIndex(detailIdentifiers).then(function (detailIndexedResult) {
