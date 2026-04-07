@@ -46,6 +46,7 @@
     this.propertiesTitle = "";
     this.propertiesTargetId = "";
     this.propertiesRequestId = 0;
+    this.pickedHighlightRequestId = 0;
     this.onChange = function () {};
   }
 
@@ -391,15 +392,35 @@
     this.focusedPathIds = next.slice();
   };
 
+  HierarchyStore.prototype.schedulePickedHighlight = function (picked, delays) {
+    var self = this;
+    var requestId = ++this.pickedHighlightRequestId;
+    var attempts = Array.isArray(delays) && delays.length ? delays.slice() : [0, 120, 360, 800];
+
+    attempts.forEach(function (delay) {
+      function run() {
+        if (requestId !== self.pickedHighlightRequestId) return;
+        Promise.resolve(self.apiAdapter.highlightPickedObject(picked)).catch(function () {
+          return "";
+        });
+      }
+
+      if (delay > 0) {
+        setTimeout(run, delay);
+      } else {
+        run();
+      }
+    });
+
+    return requestId;
+  };
+
   HierarchyStore.prototype.focusPickedObject = function (picked) {
     var self = this;
-    var initialHighlight;
     this.error = "";
     this.statusMessage = "Resolving selected object...";
     this.emit();
-    initialHighlight = Promise.resolve(this.apiAdapter.highlightPickedObject(picked)).catch(function () {
-      return "";
-    });
+    this.schedulePickedHighlight(picked, [0, 160]);
     return this.apiAdapter
       .resolvePickedObjectPath(picked)
       .then(function (result) {
@@ -407,7 +428,7 @@
         var parentId = self.rootId;
         var nextFocusedPathIds;
         var i;
-        if (!parentId) return initialHighlight;
+        if (!parentId) return;
 
         if (!path.length) {
           self.selectedId = "";
@@ -415,7 +436,7 @@
           self.clearProperties((result && result.message) || "Selected object is not present in the loaded IFC hierarchy");
           self.statusMessage = (result && result.message) || "Selected object is not present in the loaded IFC hierarchy";
           self.emit();
-          return initialHighlight;
+          return;
         }
 
         nextFocusedPathIds = [String(parentId)].concat(path.map(function (node) {
@@ -438,11 +459,7 @@
           : "Object resolved";
         self.emit();
         return self.loadSelectedProperties(self.selectedId).then(function () {
-          return initialHighlight.then(function () {
-            return Promise.resolve(self.apiAdapter.highlightPickedObject(picked)).catch(function () {
-              return "";
-            });
-          });
+          self.schedulePickedHighlight(picked, [0, 120, 360, 800]);
         });
       })
       .catch(function (err) {
